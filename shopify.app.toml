@@ -1,12 +1,13 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-# client_id and application_url are filled in by `shopify app config link` / deploy.
-client_id = ""
+# Skuweld app in the Té Company partner org.
+
+client_id = "a58bd05560ba1d46b50f3b5885f5c9e2"
 application_url = "https://skuweld.vercel.app"
 embedded = true
 name = "Skuweld"
 
 [webhooks]
-api_version = "2026-04"
+api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
