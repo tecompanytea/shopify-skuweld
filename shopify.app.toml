@@ -1,0 +1,26 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+# client_id and application_url are filled in by `shopify app config link` / deploy.
+client_id = ""
+application_url = "https://skuweld.vercel.app"
+embedded = true
+name = "Skuweld"
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+scopes = "read_inventory,read_locations,read_products"
+
+[auth]
+redirect_urls = [ "https://skuweld.vercel.app/auth/callback" ]
+
+[build]
+automatically_update_urls_on_dev = true

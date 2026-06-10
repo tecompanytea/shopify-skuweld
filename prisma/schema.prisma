@@ -1,0 +1,89 @@
+// Source-of-truth note:
+// Shopify owns Product, ProductVariant, Inventory. Square owns CatalogItem,
+// CatalogItemVariation, InventoryCount. This DB stores the Shopify session,
+// the Square OAuth connection, and the SKU master list + naming rules.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// One Square account linked per shop. v1 stores mainLocationId only;
+// a SquareLocation model is added later for per-location inventory/analytics.
+model SquareConnection {
+  id             String   @id @default(cuid())
+  shop           String   @unique
+  merchantId     String
+  merchantName   String?
+  mainLocationId String?
+  accessToken    String // AES-256-GCM, base64(iv.tag.ciphertext)
+  refreshToken   String // encrypted the same way
+  expiresAt      DateTime // access token expiry (~30 days, refreshed on use)
+  scopes         String // granted scopes, space-separated
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// Master SKU list: union of all normalized SKUs ever seen on either channel.
+// Populated/refreshed only by the explicit "Sync SKUs" action; rows are kept
+// (with presence flags flipped off) when a SKU disappears from a channel.
+model Sku {
+  id                String   @id @default(cuid())
+  shop              String
+  value             String // normalized: trim + uppercase
+  rawValue          String // as last seen, for display
+  productName       String? // last-seen product title (either channel)
+  presentInShopify  Boolean  @default(false)
+  presentInSquare   Boolean  @default(false)
+  shopifyVariantGid String? // gid://shopify/ProductVariant/...
+  squareVariationId String? // CatalogItemVariation id
+  isClean           Boolean  @default(false) // cached rule evaluation
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shop, value])
+  @@index([shop, isClean])
+  @@index([shop, presentInShopify, presentInSquare])
+}
+
+// Configurable SKU naming rules; a SKU is "clean" iff every enabled rule passes.
+model SkuRule {
+  id        String   @id @default(cuid())
+  shop      String
+  name      String // human label, e.g. "Tea SKUs start with TE-"
+  type      String // REGEX | PREFIX | MIN_LENGTH | MAX_LENGTH | NO_SPACES | DIGITS_ONLY | UPPERCASE
+  value     String? // pattern / prefix / length; null for boolean checks
+  enabled   Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
