@@ -31,3 +31,6 @@ pnpm-lock.yaml
 
 .vercel
 .env*
+
+# Local reports/scratch — never committed
+/reports/

@@ -73,6 +73,46 @@ model Sku {
   @@index([shop, presentInShopify, presentInSquare])
 }
 
+// Analytics fact table: one row per order line (sale or return) from either
+// channel, normalized. All report types aggregate this table. Money is in
+// cents; sale rows are positive, return rows negative, so SUM() is correct.
+// `day` is precomputed in America/New_York — the reports' bucketing rule.
+model SalesLine {
+  id            String   @id // source-prefixed natural key, e.g. "sq:<order>:<uid>"
+  shop          String
+  source        String // shopify | square
+  channel       String // WV | EV | ECOM | INVOICED
+  kind          String // sale | return
+  orderId       String
+  occurredAt    DateTime
+  day           String // YYYY-MM-DD, America/New_York
+  sku           String?
+  itemName      String
+  variationName String?
+  category      String? // Square category name / Shopify product type
+  quantity      Float // signed; Square quantities can be fractional
+  grossCents    Int // signed
+  discountCents Int // signed; amount subtracted from gross
+  netCents      Int // signed; gross - discount
+  taxCents      Int // signed
+  syncedAt      DateTime @updatedAt
+
+  @@index([shop, day])
+  @@index([shop, channel, day])
+  @@index([shop, category, day])
+}
+
+// Progress per sync job (id = `${shop}:${key}`), so long backfills are
+// resumable and the UI can show what happened.
+model SyncState {
+  id        String   @id
+  shop      String
+  status    String   @default("idle") // idle | running | done | error
+  progress  String?
+  error     String?
+  updatedAt DateTime @updatedAt
+}
+
 // Configurable SKU naming rules; a SKU is "clean" iff every enabled rule passes.
 model SkuRule {
   id        String   @id @default(cuid())

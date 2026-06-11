@@ -8,6 +8,10 @@ export const SQUARE_SCOPES = [
   "ITEMS_READ",
   "INVENTORY_READ",
   "MERCHANT_PROFILE_READ",
+  // Analytics: order/invoice history for the reports fact table.
+  "ORDERS_READ",
+  "INVOICES_READ",
+  "PAYMENTS_READ",
 ];
 
 const STATE_TTL_MS = 10 * 60 * 1000;
