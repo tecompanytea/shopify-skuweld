@@ -24,11 +24,17 @@ interface ChannelGolden {
   all: { ty: number; ly: number };
 }
 
+// Known methodology difference: the manual YTD Tea workbook excluded the
+// limited in-store "BTS" batch items (store-only small batches, almost all
+// East Village). Those are real loose-leaf sales, so the engine includes
+// them — within the YTD windows that's EV +$25.00 TY (S Wild '19, Feb 15
+// 2026) and EV +$151.00 LY (May 31 2025 batch cluster).
 const CASES: Array<{
   label: string;
   scope: string;
   range: { start: string; end: string };
   golden: ChannelGolden;
+  adjust?: Partial<Record<"wv" | "ev" | "ecom" | "all", { ty: number; ly: number }>>;
 }> = [
   {
     label: "May Teaware (May 2026 vs May 2025)",
@@ -50,6 +56,10 @@ const CASES: Array<{
       ev: { ty: 2570210, ly: 1667420 },
       ecom: { ty: 5751040, ly: 4896702 },
       all: { ty: 11860095, ly: 9553142 },
+    },
+    adjust: {
+      ev: { ty: 2500, ly: 15100 },
+      all: { ty: 2500, ly: 15100 },
     },
   },
 ];
@@ -89,15 +99,26 @@ for (const testCase of CASES) {
     ECOM: testCase.golden.ecom,
     ALL: testCase.golden.all,
   };
+  const adjustByKey: Record<string, { ty: number; ly: number } | undefined> = {
+    WV: testCase.adjust?.wv,
+    EV: testCase.adjust?.ev,
+    ECOM: testCase.adjust?.ecom,
+    ALL: testCase.adjust?.all,
+  };
   for (const [key, ty, ly] of actuals) {
-    for (const [year, actual, expected] of [
+    for (const [year, actual, golden] of [
       ["TY", ty, goldenByKey[key].ty],
       ["LY", ly, goldenByKey[key].ly],
     ] as const) {
+      const adjust = adjustByKey[key]?.[year === "TY" ? "ty" : "ly"] ?? 0;
+      const expected = golden + adjust;
       const ok = actual === expected;
       if (!ok) failures += 1;
+      const note = adjust
+        ? ` (golden ${dollars(golden)} + known difference)`
+        : "";
       console.log(
-        `${ok ? "✓" : "✗"} ${key} ${year}  actual ${dollars(actual)}  target ${dollars(expected)}${
+        `${ok ? "✓" : "✗"} ${key} ${year}  actual ${dollars(actual)}  target ${dollars(expected)}${note}${
           ok ? "" : `  DIFF ${dollars(actual - expected)}`
         }`,
       );
