@@ -127,17 +127,28 @@ function dollars(cents: number): string {
   });
 }
 
-function pctToLY(pair: CellPair): string {
-  if (pair.ly === 0) return pair.ty === 0 ? "—" : "New";
-  return `${(((pair.ty - pair.ly) / Math.abs(pair.ly)) * 100).toFixed(1)}%`;
-}
-
 function PairCells({ pair }: { pair: CellPair }) {
+  let change: { label: string; tone: "success" | "critical" | "neutral" } | null;
+  if (pair.ly === 0) {
+    change = pair.ty === 0 ? null : { label: "New", tone: "success" };
+  } else {
+    const pct = ((pair.ty - pair.ly) / Math.abs(pair.ly)) * 100;
+    change = {
+      label: `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`,
+      tone: pct > 0 ? "success" : pct < 0 ? "critical" : "neutral",
+    };
+  }
   return (
     <>
       <s-table-cell>{dollars(pair.ty)}</s-table-cell>
       <s-table-cell>{dollars(pair.ly)}</s-table-cell>
-      <s-table-cell>{pctToLY(pair)}</s-table-cell>
+      <s-table-cell>
+        {change ? (
+          <s-badge tone={change.tone}>{change.label}</s-badge>
+        ) : (
+          "—"
+        )}
+      </s-table-cell>
     </>
   );
 }
@@ -325,10 +336,12 @@ export default function Analytics() {
     return params;
   };
 
-  const exportXlsx = async () => {
+  const exportXlsx = async (typeOverride?: string) => {
     setExporting(true);
     try {
-      const query = new URLSearchParams(currentParams()).toString();
+      const params = currentParams();
+      if (typeOverride) params.type = typeOverride;
+      const query = new URLSearchParams(params).toString();
       const response = await fetch(`/app/analytics/export?${query}`);
       if (!response.ok) throw new Error(`Export failed (${response.status})`);
       const blob = await response.blob();
@@ -390,26 +403,6 @@ export default function Analytics() {
                 </s-option>
               ))}
             </s-select>
-            {pickedPreset === "custom" && (
-              <>
-                <s-text-field
-                  label="From"
-                  value={customStart}
-                  placeholder="YYYY-MM-DD"
-                  onInput={(event) =>
-                    setCustomStart((event.target as HTMLInputElement).value)
-                  }
-                />
-                <s-text-field
-                  label="To"
-                  value={customEnd}
-                  placeholder="YYYY-MM-DD"
-                  onInput={(event) =>
-                    setCustomEnd((event.target as HTMLInputElement).value)
-                  }
-                />
-              </>
-            )}
             <s-button
               variant="primary"
               onClick={() => setSearchParams(currentParams())}
@@ -423,7 +416,33 @@ export default function Analytics() {
             >
               Export .xlsx
             </s-button>
+            <s-button
+              variant="secondary"
+              disabled={exporting || lineCount === 0}
+              onClick={() => void exportXlsx("all")}
+            >
+              Export all reports
+            </s-button>
           </s-stack>
+          {pickedPreset === "custom" && (
+            <s-box maxInlineSize="360px">
+              <s-date-picker
+                type="range"
+                value={`${customStart}--${customEnd}`}
+                onChange={(event) => {
+                  const picked = (event.currentTarget as { value?: string })
+                    .value;
+                  const match = picked?.match(
+                    /^(\d{4}-\d{2}-\d{2})--(\d{4}-\d{2}-\d{2})$/,
+                  );
+                  if (match) {
+                    setCustomStart(match[1]);
+                    setCustomEnd(match[2]);
+                  }
+                }}
+              />
+            </s-box>
+          )}
           <s-text color="subdued">
             {`Showing ${range.start} → ${range.end}${
               lyRange

@@ -7,7 +7,9 @@ import { computeProductSellingReport } from "../.server/analytics/product-sellin
 import {
   buildWeeklyWorkbook,
   buildProductSellingWorkbook,
+  buildAllReportsWorkbook,
 } from "../.server/analytics/export-xlsx";
+import { PRODUCT_REPORT_SCOPES } from "../.server/analytics/categories";
 
 // Resource route: GET /app/analytics/export?type=...&start=...&end=...
 // Returns the report as an .xlsx download. Called via App Bridge fetch
@@ -33,6 +35,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
     buffer = await buildProductSellingWorkbook(report);
     filename = `Product Selling ${report.scope.label} ${range.start} - ${range.end}.xlsx`;
+  } else if (type === "all") {
+    const weekly = await computeWeeklyReport(shop, range);
+    const products = [];
+    for (const scope of PRODUCT_REPORT_SCOPES) {
+      products.push(await computeProductSellingReport(shop, scope.key, range));
+    }
+    buffer = await buildAllReportsWorkbook(weekly, products);
+    filename = `Te Company Reports ${range.start} - ${range.end}.xlsx`;
   } else {
     throw new Response(`Unknown report type: ${type}`, { status: 400 });
   }

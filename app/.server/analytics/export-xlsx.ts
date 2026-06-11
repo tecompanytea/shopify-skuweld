@@ -26,11 +26,12 @@ function moneyCell(row: ExcelJS.Row, col: number, cents: number) {
   cell.numFmt = MONEY;
 }
 
-export async function buildWeeklyWorkbook(
+function writeWeeklySheet(
+  workbook: ExcelJS.Workbook,
   report: WeeklyReport,
-): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Report");
+  title = "Report",
+): void {
+  const sheet = workbook.addWorksheet(title);
   sheet.getColumn(1).width = 26;
   for (const c of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
     sheet.getColumn(c).width = 12;
@@ -136,7 +137,13 @@ export async function buildWeeklyWorkbook(
   for (const g of report.groups) {
     writeCategoryRow(`TTL ${g.group}`, g.total, undefined, undefined, undefined, true);
   }
+}
 
+export async function buildWeeklyWorkbook(
+  report: WeeklyReport,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  writeWeeklySheet(workbook, report);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -236,9 +243,22 @@ export async function buildProductSellingWorkbook(
     addChannelSheet("E-commerce", (r) => r.channels.ECOM);
   }
 
-  const combined = workbook.addWorksheet("All Channels Combined");
+  writeProductCombinedSheet(workbook, report, "All Channels Combined");
+
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+function writeProductCombinedSheet(
+  workbook: ExcelJS.Workbook,
+  report: ProductSellingReport,
+  title: string,
+): void {
+  const combined = workbook.addWorksheet(title);
   combined.getColumn(2).width = 42;
   for (const c of [3, 4, 5, 6, 7, 8]) combined.getColumn(c).width = 13;
+  combined.addRow([
+    `${report.scope.label} — ${report.range.start} → ${report.range.end} vs ${report.lyRange.start} → ${report.lyRange.end}`,
+  ]).font = { bold: true };
   const combinedHeader = combined.addRow([
     "#",
     "Product",
@@ -259,6 +279,28 @@ export async function buildProductSellingWorkbook(
     moneyCell(row, 7, r.channels.EV.ty.net);
     moneyCell(row, 8, r.channels.ECOM.ty.net);
   });
+  const totalRow = combined.addRow(["", "TOTAL"]);
+  totalRow.font = { bold: true };
+  moneyCell(totalRow, 3, report.channelTotals.ALL.ly.net);
+  moneyCell(totalRow, 4, report.channelTotals.ALL.ty.net);
+  pctCell(
+    totalRow,
+    5,
+    report.channelTotals.ALL.ty.net,
+    report.channelTotals.ALL.ly.net,
+  );
+}
 
+// One workbook with everything for the chosen period: the weekly meeting
+// report plus a combined product-selling sheet per category.
+export async function buildAllReportsWorkbook(
+  weekly: WeeklyReport,
+  productReports: ProductSellingReport[],
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  writeWeeklySheet(workbook, weekly, "Weekly Report");
+  for (const report of productReports) {
+    writeProductCombinedSheet(workbook, report, report.scope.label.slice(0, 31));
+  }
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
