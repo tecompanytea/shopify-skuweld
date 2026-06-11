@@ -1,6 +1,8 @@
 import ExcelJS from "exceljs";
 import type { WeeklyReport, CellPair } from "./weekly-report";
 import type { ProductSellingReport, ProductCell } from "./product-selling-report";
+import { SIZE_COLUMNS, type UnitsBySizeReport } from "./units-by-size-report";
+import type { Top10Report } from "./top10-report";
 
 // Renders reports as .xlsx workbooks shaped like the manual templates.
 // Data fidelity is the contract; styling is intentionally minimal.
@@ -291,16 +293,126 @@ function writeProductCombinedSheet(
   );
 }
 
+function writeUnitsSheet(
+  workbook: ExcelJS.Workbook,
+  report: UnitsBySizeReport,
+  title: string,
+  channel: string | null, // null = totals across channels
+): void {
+  const sheet = workbook.addWorksheet(title);
+  sheet.getColumn(1).width = 8;
+  sheet.getColumn(2).width = 36;
+  for (let c = 3; c <= 9; c += 1) sheet.getColumn(c).width = 10;
+  sheet.addRow([
+    `Loose Leaf Tea — Unit Sales ${channel ?? "Total"} · ${report.range.start} → ${report.range.end} · net units after returns`,
+  ]).font = { bold: true };
+  const header = sheet.addRow(["Style #", "Tea", ...SIZE_COLUMNS, "Total"]);
+  header.font = { bold: true };
+  for (const row of report.rows) {
+    const sizes = channel ? row.byChannel[channel] : row.total;
+    if (!sizes) continue;
+    const total = SIZE_COLUMNS.reduce((sum, size) => sum + sizes[size], 0);
+    if (total === 0) continue;
+    sheet.addRow([
+      row.styleNumber ?? "",
+      row.name,
+      ...SIZE_COLUMNS.map((size) => sizes[size]),
+      total,
+    ]);
+  }
+}
+
+export async function buildUnitsBySizeWorkbook(
+  report: UnitsBySizeReport,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  for (const channel of report.channels) {
+    writeUnitsSheet(workbook, report, channel, channel);
+  }
+  writeUnitsSheet(workbook, report, "Total", null);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+function writeTop10Sheets(
+  workbook: ExcelJS.Workbook,
+  report: Top10Report,
+  prefix = "",
+): void {
+  const summary = workbook.addWorksheet(`${prefix}By Category`.slice(0, 31));
+  summary.getColumn(1).width = 14;
+  summary.getColumn(2).width = 28;
+  for (const c of [3, 4, 5, 6]) summary.getColumn(c).width = 12;
+  summary.addRow([
+    `Net sales by category · ${report.range.start} → ${report.range.end} vs ${report.lyRange.start} → ${report.lyRange.end} (weekday-aligned) · invoiced excluded`,
+  ]).font = { bold: true };
+  for (const channel of report.channels) {
+    summary.addRow([]);
+    const head = summary.addRow([channel.channel, "Category", "TY", "LY", "% to LY", "TY % pen"]);
+    head.font = { bold: true };
+    for (const category of channel.categories) {
+      const row = summary.addRow(["", category.category]);
+      moneyCell(row, 3, category.ty);
+      moneyCell(row, 4, category.ly);
+      pctCell(row, 5, category.ty, category.ly);
+      row.getCell(6).value = category.tyPenetration;
+      row.getCell(6).numFmt = PCT;
+    }
+    const totalRow = summary.addRow(["", "TOTAL"]);
+    totalRow.font = { bold: true };
+    moneyCell(totalRow, 3, channel.totalTy);
+    moneyCell(totalRow, 4, channel.totalLy);
+    pctCell(totalRow, 5, channel.totalTy, channel.totalLy);
+  }
+
+  for (const channel of report.channels) {
+    const sheet = workbook.addWorksheet(`${prefix}Top10 ${channel.channel}`.slice(0, 31));
+    sheet.getColumn(2).width = 38;
+    sheet.getColumn(3).width = 16;
+    sheet.getColumn(4).width = 12;
+    sheet.getColumn(5).width = 8;
+    const writeList = (
+      label: string,
+      items: Top10Report["channels"][number]["topOverall"],
+    ) => {
+      sheet.addRow([]);
+      sheet.addRow([label]).font = { bold: true };
+      const head = sheet.addRow(["#", "Item", "Variation", "Net $", "Units"]);
+      head.font = { bold: true };
+      items.forEach((item, index) => {
+        const row = sheet.addRow([index + 1, item.name, item.variation ?? ""]);
+        moneyCell(row, 4, item.net);
+        row.getCell(5).value = item.units;
+      });
+    };
+    writeList("All Categories", channel.topOverall);
+    for (const category of channel.categories) {
+      const items = channel.topByCategory[category.category];
+      if (items?.length) writeList(category.category, items);
+    }
+  }
+}
+
+export async function buildTop10Workbook(report: Top10Report): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  writeTop10Sheets(workbook, report);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
 // One workbook with everything for the chosen period: the weekly meeting
-// report plus a combined product-selling sheet per category.
+// report, a combined product-selling sheet per category, the Top10
+// category summary, and the units-by-size totals.
 export async function buildAllReportsWorkbook(
   weekly: WeeklyReport,
   productReports: ProductSellingReport[],
+  top10: Top10Report,
+  units: UnitsBySizeReport,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   writeWeeklySheet(workbook, weekly, "Weekly Report");
   for (const report of productReports) {
     writeProductCombinedSheet(workbook, report, report.scope.label.slice(0, 31));
   }
+  writeTop10Sheets(workbook, top10, "T10 ");
+  writeUnitsSheet(workbook, units, "Units by Size", null);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }

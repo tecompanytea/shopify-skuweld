@@ -4,9 +4,13 @@ import { authenticate } from "../shopify.server";
 import { resolveAnalyticsShop, resolveRange } from "../.server/analytics/request";
 import { computeWeeklyReport } from "../.server/analytics/weekly-report";
 import { computeProductSellingReport } from "../.server/analytics/product-selling-report";
+import { computeTop10Report } from "../.server/analytics/top10-report";
+import { computeUnitsBySizeReport } from "../.server/analytics/units-by-size-report";
 import {
   buildWeeklyWorkbook,
   buildProductSellingWorkbook,
+  buildTop10Workbook,
+  buildUnitsBySizeWorkbook,
   buildAllReportsWorkbook,
 } from "../.server/analytics/export-xlsx";
 import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
@@ -35,13 +39,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
     buffer = await buildProductSellingWorkbook(report);
     filename = `Product Selling ${report.scope.label} ${range.start} - ${range.end}.xlsx`;
+  } else if (type === "top10") {
+    const report = await computeTop10Report(shop, range);
+    buffer = await buildTop10Workbook(report);
+    filename = `Category Top10 ${range.start} - ${range.end}.xlsx`;
+  } else if (type === "units-by-size") {
+    const report = await computeUnitsBySizeReport(shop, range);
+    buffer = await buildUnitsBySizeWorkbook(report);
+    filename = `Loose Leaf Units by Size ${range.start} - ${range.end}.xlsx`;
   } else if (type === "all") {
     const weekly = await computeWeeklyReport(shop, range);
     const products = [];
     for (const scope of PRODUCT_REPORT_SCOPES) {
       products.push(await computeProductSellingReport(shop, scope.key, range));
     }
-    buffer = await buildAllReportsWorkbook(weekly, products);
+    const top10 = await computeTop10Report(shop, range);
+    const units = await computeUnitsBySizeReport(shop, range);
+    buffer = await buildAllReportsWorkbook(weekly, products, top10, units);
     filename = `Te Company Reports ${range.start} - ${range.end}.xlsx`;
   } else {
     throw new Response(`Unknown report type: ${type}`, { status: 400 });

@@ -30,6 +30,15 @@ import {
   computeProductSellingReport,
   type ProductSellingReport,
 } from "../.server/analytics/product-selling-report";
+import {
+  computeTop10Report,
+  type Top10Report,
+} from "../.server/analytics/top10-report";
+import {
+  computeUnitsBySizeReport,
+  type UnitsBySizeReport,
+} from "../.server/analytics/units-by-size-report";
+import { SIZE_COLUMNS } from "../lib/analytics-scopes";
 import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 import type { DayRange } from "../.server/analytics/periods";
 
@@ -58,6 +67,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   let weekly: WeeklyReport | null = null;
   let productSelling: ProductSellingReport | null = null;
+  let top10: Top10Report | null = null;
+  let unitsBySize: UnitsBySizeReport | null = null;
   if (lineCount > 0) {
     if (type === "weekly") {
       weekly = await computeWeeklyReport(shop, range);
@@ -67,6 +78,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         type.slice("product-".length),
         range,
       );
+    } else if (type === "top10") {
+      top10 = await computeTop10Report(shop, range);
+    } else if (type === "units-by-size") {
+      unitsBySize = await computeUnitsBySizeReport(shop, range);
     }
   }
 
@@ -79,6 +94,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     override,
     weekly,
     productSelling,
+    top10,
+    unitsBySize,
   };
 };
 
@@ -243,6 +260,102 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
   );
 }
 
+function Top10Block({ report }: { report: Top10Report }) {
+  const channelLabel: Record<string, string> = {
+    WV: "West Village",
+    EV: "East Village",
+    ECOM: "E-commerce",
+    ALL: "All channels",
+  };
+  return (
+    <s-stack direction="block" gap="large">
+      {report.channels.map((channel) => (
+        <s-stack key={channel.channel} direction="block" gap="base">
+          <s-box padding="base">
+            <s-heading>{channelLabel[channel.channel] ?? channel.channel}</s-heading>
+          </s-box>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Category</s-table-header>
+              <s-table-header listSlot="labeled">TY</s-table-header>
+              <s-table-header listSlot="labeled">LY</s-table-header>
+              <s-table-header listSlot="secondary">% to LY</s-table-header>
+              <s-table-header listSlot="labeled">TY % pen</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {channel.categories.map((category) => (
+                <s-table-row key={category.category}>
+                  <s-table-cell>{category.category}</s-table-cell>
+                  <PairCells pair={{ ty: category.ty, ly: category.ly }} />
+                  <s-table-cell>
+                    {`${(category.tyPenetration * 100).toFixed(1)}%`}
+                  </s-table-cell>
+                </s-table-row>
+              ))}
+              <s-table-row>
+                <s-table-cell>TOTAL</s-table-cell>
+                <PairCells pair={{ ty: channel.totalTy, ly: channel.totalLy }} />
+                <s-table-cell>100%</s-table-cell>
+              </s-table-row>
+            </s-table-body>
+          </s-table>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">#</s-table-header>
+              <s-table-header listSlot="primary">Top 10 items</s-table-header>
+              <s-table-header listSlot="secondary">Variation</s-table-header>
+              <s-table-header listSlot="labeled">Net $</s-table-header>
+              <s-table-header listSlot="labeled">Units</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {channel.topOverall.map((item, index) => (
+                <s-table-row key={`${item.name}|${item.variation}`}>
+                  <s-table-cell>{index + 1}</s-table-cell>
+                  <s-table-cell>{item.name}</s-table-cell>
+                  <s-table-cell>{item.variation ?? "—"}</s-table-cell>
+                  <s-table-cell>{dollars(item.net)}</s-table-cell>
+                  <s-table-cell>{item.units}</s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-stack>
+      ))}
+    </s-stack>
+  );
+}
+
+function UnitsBySizeBlock({ report }: { report: UnitsBySizeReport }) {
+  return (
+    <s-table>
+      <s-table-header-row>
+        <s-table-header listSlot="kicker">Style #</s-table-header>
+        <s-table-header listSlot="primary">Tea</s-table-header>
+        {SIZE_COLUMNS.map((size) => (
+          <s-table-header key={size} listSlot="labeled">
+            {size}
+          </s-table-header>
+        ))}
+        <s-table-header listSlot="secondary">Total</s-table-header>
+      </s-table-header-row>
+      <s-table-body>
+        {report.rows
+          .filter((row) => row.totalUnits !== 0)
+          .map((row) => (
+            <s-table-row key={`${row.styleNumber ?? ""}|${row.name}`}>
+              <s-table-cell>{row.styleNumber ?? "—"}</s-table-cell>
+              <s-table-cell>{row.name}</s-table-cell>
+              {SIZE_COLUMNS.map((size) => (
+                <s-table-cell key={size}>{row.total[size] || ""}</s-table-cell>
+              ))}
+              <s-table-cell>{row.totalUnits}</s-table-cell>
+            </s-table-row>
+          ))}
+      </s-table-body>
+    </s-table>
+  );
+}
+
 function ProductSellingBlock({ report }: { report: ProductSellingReport }) {
   const hasEcom = report.scope.shopifyProductTypes.length > 0;
   return (
@@ -311,6 +424,8 @@ export default function Analytics() {
     override,
     weekly,
     productSelling,
+    top10,
+    unitsBySize,
   } = useLoaderData<typeof loader>();
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
@@ -360,10 +475,14 @@ export default function Analytics() {
   const reportTitle =
     type === "weekly"
       ? "Weekly meeting report"
-      : (productSelling
-          ? `Product selling — ${productSelling.scope.label}`
-          : "Report");
-  const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? null;
+      : type === "top10"
+        ? "Category Top 10"
+        : type === "units-by-size"
+          ? "Loose Leaf — Units by size"
+          : (productSelling
+              ? `Product selling — ${productSelling.scope.label}`
+              : "Report");
+  const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? top10?.lyRange ?? null;
 
   return (
     <s-page heading="Analytics">
@@ -389,6 +508,10 @@ export default function Analytics() {
                   {`Product selling — ${scope.label}`}
                 </s-option>
               ))}
+              <s-option value="top10">Category Top 10</s-option>
+              <s-option value="units-by-size">
+                Loose Leaf — Units by size
+              </s-option>
             </s-select>
             <s-select
               label="Period"
@@ -467,6 +590,10 @@ export default function Analytics() {
           </s-stack>
         ) : productSelling ? (
           <ProductSellingBlock report={productSelling} />
+        ) : top10 ? (
+          <Top10Block report={top10} />
+        ) : unitsBySize ? (
+          <UnitsBySizeBlock report={unitsBySize} />
         ) : (
           <s-box padding="base">
             <s-paragraph>

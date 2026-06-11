@@ -7,6 +7,10 @@
 // Pure data, shared by server (report engines) and client (report picker) —
 // must stay free of server-only imports.
 
+// Size columns for the units-by-size report (the SKU variant codes).
+export const SIZE_COLUMNS = ["1 oz", "2 oz", "4 oz", "8 oz", "10g", "Other"] as const;
+export type SizeColumn = (typeof SIZE_COLUMNS)[number];
+
 export interface ProductReportScope {
   key: string;
   label: string;

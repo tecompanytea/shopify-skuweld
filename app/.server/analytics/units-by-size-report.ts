@@ -1,5 +1,8 @@
 import prisma from "../../db.server";
+import { SIZE_COLUMNS, type SizeColumn } from "../../lib/analytics-scopes";
 import type { DayRange } from "./periods";
+
+export { SIZE_COLUMNS, type SizeColumn };
 
 // Units-by-size report: loose leaf tea, NET units (after returns), one row
 // per product family, one column per size. Mirrors the manual
@@ -7,9 +10,6 @@ import type { DayRange } from "./periods";
 // (01/02/04/08 = 1/2/4/8 oz, plus 10g), everything else is "Other"
 // (packaged/by-the-box, default variants). Cross-channel identity by SKU
 // family; the 3-digit family doubles as the "Style #" column.
-
-export const SIZE_COLUMNS = ["1 oz", "2 oz", "4 oz", "8 oz", "10g", "Other"] as const;
-export type SizeColumn = (typeof SIZE_COLUMNS)[number];
 
 export interface UnitsRow {
   name: string;
