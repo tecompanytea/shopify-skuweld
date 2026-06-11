@@ -40,6 +40,17 @@ export function weekdayAlignedLastYear(range: DayRange): DayRange {
   return { start: shiftDay(range.start, -364), end: shiftDay(range.end, -364) };
 }
 
+// Same calendar dates one year earlier (the product-selling reports' LY
+// mode: "May 2026 vs May 2025"). Feb 29 clamps to Feb 28.
+export function calendarLastYear(range: DayRange): DayRange {
+  const shift = (day: string): string => {
+    const [y, m, d] = day.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
+    return `${y - 1}-${String(m).padStart(2, "0")}-${String(Math.min(d, lastDay)).padStart(2, "0")}`;
+  };
+  return { start: shift(range.start), end: shift(range.end) };
+}
+
 // The local-day range covers these UTC instants (for API date filters):
 // from start-day 00:00 ET to the instant after end-day 23:59:59.999 ET.
 // New York offset is -05:00 (EST) or -04:00 (EDT); using the wider bound on

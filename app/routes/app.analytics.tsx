@@ -1,9 +1,15 @@
+import { useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData, useRouteError } from "react-router";
+import {
+  useFetcher,
+  useLoaderData,
+  useRouteError,
+  useSearchParams,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -11,56 +17,69 @@ import prisma from "../db.server";
 import { syncSquareOrders } from "../.server/analytics/square-sync";
 import { syncShopifyOrders } from "../.server/analytics/shopify-sync";
 import {
+  analyticsShopOverride,
+  resolveAnalyticsShop,
+  resolveRange,
+} from "../.server/analytics/request";
+import {
   computeWeeklyReport,
   type CellPair,
   type WeeklyReport,
 } from "../.server/analytics/weekly-report";
-import { toReportDay, shiftDay, type DayRange } from "../.server/analytics/periods";
+import {
+  computeProductSellingReport,
+  type ProductSellingReport,
+} from "../.server/analytics/product-selling-report";
+import { PRODUCT_REPORT_SCOPES } from "../.server/analytics/categories";
+import type { DayRange } from "../.server/analytics/periods";
 
-// Last full Mon-Sun week before today (report timezone).
-function defaultRange(): DayRange {
-  const today = toReportDay(new Date());
-  const dayOfWeek = new Date(`${today}T12:00:00Z`).getUTCDay(); // 0=Sun
-  const daysSinceMonday = (dayOfWeek + 6) % 7;
-  const thisMonday = shiftDay(today, -daysSinceMonday);
-  return { start: shiftDay(thisMonday, -7), end: shiftDay(thisMonday, -1) };
-}
-
-function requestedRange(request: Request): DayRange {
-  const url = new URL(request.url);
-  const start = url.searchParams.get("start");
-  const end = url.searchParams.get("end");
-  if (start && /^\d{4}-\d{2}-\d{2}$/.test(start) && end && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
-    return { start, end };
-  }
-  return defaultRange();
-}
-
-// Local development can read another shop's already-synced data (the real
-// store's fact table in the shared DB) without being installed there:
-// set ANALYTICS_SHOP_OVERRIDE in .env. Dev-only, and reads only — sync
-// actions are blocked under the override so dev-store orders can never be
-// written into the real shop's rows.
-function analyticsShopOverride(): string | null {
-  return process.env.NODE_ENV === "development"
-    ? (process.env.ANALYTICS_SHOP_OVERRIDE ?? null)
-    : null;
-}
+const PRESETS = [
+  { value: "last-week", label: "Last full week (Mon–Sun)" },
+  { value: "mtd", label: "Month to date" },
+  { value: "qtd", label: "Quarter to date" },
+  { value: "ytd", label: "Year to date" },
+  { value: "rolling-12m", label: "Rolling 12 months" },
+  { value: "custom", label: "Custom range" },
+] as const;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const override = analyticsShopOverride();
-  const shop = override ?? session.shop;
-  const range = requestedRange(request);
+  const shop = resolveAnalyticsShop(session.shop);
+  const url = new URL(request.url);
+  const type = url.searchParams.get("type") ?? "weekly";
+  const preset = url.searchParams.get("preset") ?? "last-week";
+  const range = resolveRange(url.searchParams);
 
   const [syncStates, lineCount] = await Promise.all([
     prisma.syncState.findMany({ where: { shop } }),
     prisma.salesLine.count({ where: { shop } }),
   ]);
 
-  const report = lineCount > 0 ? await computeWeeklyReport(shop, range) : null;
+  let weekly: WeeklyReport | null = null;
+  let productSelling: ProductSellingReport | null = null;
+  if (lineCount > 0) {
+    if (type === "weekly") {
+      weekly = await computeWeeklyReport(shop, range);
+    } else if (type.startsWith("product-")) {
+      productSelling = await computeProductSellingReport(
+        shop,
+        type.slice("product-".length),
+        range,
+      );
+    }
+  }
 
-  return { range, syncStates, lineCount, report, override };
+  return {
+    type,
+    preset,
+    range,
+    syncStates,
+    lineCount,
+    override,
+    weekly,
+    productSelling,
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -68,7 +87,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (analyticsShopOverride()) {
     return {
       error:
-        "ANALYTICS_SHOP_OVERRIDE is active (read-only). Run syncs from the real store or the reconcile script.",
+        "ANALYTICS_SHOP_OVERRIDE is active (read-only). Run syncs from the real store or the backfill script.",
     };
   }
   const form = await request.formData();
@@ -190,31 +209,19 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
             <s-table-cell>{dollars(c.ecom.ty)}</s-table-cell>
           </s-table-row>
         ))}
-        <s-table-row>
-          <s-table-cell>Total Retail</s-table-cell>
-          <PairCells pair={report.sections.retail} />
-          <s-table-cell />
-          <s-table-cell />
-          <s-table-cell />
-        </s-table-row>
-        <s-table-row>
-          <s-table-cell>Total Service</s-table-cell>
-          <PairCells pair={report.sections.service} />
-          <s-table-cell />
-          <s-table-cell />
-          <s-table-cell />
-        </s-table-row>
-        <s-table-row>
-          <s-table-cell>Others</s-table-cell>
-          <PairCells pair={report.sections.others} />
-          <s-table-cell />
-          <s-table-cell />
-          <s-table-cell />
-        </s-table-row>
-        {report.groups.map((g) => (
-          <s-table-row key={g.group}>
-            <s-table-cell>{`TTL ${g.group}`}</s-table-cell>
-            <PairCells pair={g.total} />
+        {(
+          [
+            ["Total Retail", report.sections.retail],
+            ["Total Service", report.sections.service],
+            ["Others", report.sections.others],
+            ...report.groups.map(
+              (g) => [`TTL ${g.group}`, g.total] as [string, CellPair],
+            ),
+          ] as Array<[string, CellPair]>
+        ).map(([label, pair]) => (
+          <s-table-row key={label}>
+            <s-table-cell>{label}</s-table-cell>
+            <PairCells pair={pair} />
             <s-table-cell />
             <s-table-cell />
             <s-table-cell />
@@ -225,20 +232,125 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
   );
 }
 
+function ProductSellingBlock({ report }: { report: ProductSellingReport }) {
+  const hasEcom = report.scope.shopifyProductTypes.length > 0;
+  return (
+    <s-stack direction="block" gap="base">
+      <s-table>
+        <s-table-header-row>
+          <s-table-header listSlot="primary">Channel</s-table-header>
+          <s-table-header listSlot="labeled">TY Net</s-table-header>
+          <s-table-header listSlot="labeled">LY Net</s-table-header>
+          <s-table-header listSlot="secondary">% Change</s-table-header>
+        </s-table-header-row>
+        <s-table-body>
+          {(
+            [
+              ["West Village", report.channelTotals.WV],
+              ["East Village", report.channelTotals.EV],
+              ...(hasEcom
+                ? ([["E-commerce", report.channelTotals.ECOM]] as const)
+                : []),
+              ["ALL CHANNELS", report.channelTotals.ALL],
+            ] as Array<
+              [string, { ty: { net: number }; ly: { net: number } }]
+            >
+          ).map(([label, totals]) => (
+            <s-table-row key={label}>
+              <s-table-cell>{label}</s-table-cell>
+              <PairCells pair={{ ty: totals.ty.net, ly: totals.ly.net }} />
+            </s-table-row>
+          ))}
+        </s-table-body>
+      </s-table>
+
+      <s-table paginate={false}>
+        <s-table-header-row>
+          <s-table-header listSlot="kicker">#</s-table-header>
+          <s-table-header listSlot="primary">Product</s-table-header>
+          <s-table-header listSlot="labeled">TY Net</s-table-header>
+          <s-table-header listSlot="labeled">LY Net</s-table-header>
+          <s-table-header listSlot="secondary">% Change</s-table-header>
+          <s-table-header listSlot="labeled">TY Units</s-table-header>
+          <s-table-header listSlot="labeled">LY Units</s-table-header>
+        </s-table-header-row>
+        <s-table-body>
+          {report.rows.map((row, index) => (
+            <s-table-row key={row.familyKey}>
+              <s-table-cell>{index + 1}</s-table-cell>
+              <s-table-cell>{row.name}</s-table-cell>
+              <PairCells pair={{ ty: row.ty.net, ly: row.ly.net }} />
+              <s-table-cell>{row.ty.units}</s-table-cell>
+              <s-table-cell>{row.ly.units}</s-table-cell>
+            </s-table-row>
+          ))}
+        </s-table-body>
+      </s-table>
+    </s-stack>
+  );
+}
+
 export default function Analytics() {
-  const { range, syncStates, lineCount, report, override } =
-    useLoaderData<typeof loader>();
+  const {
+    type,
+    preset,
+    range,
+    syncStates,
+    lineCount,
+    override,
+    weekly,
+    productSelling,
+  } = useLoaderData<typeof loader>();
+  const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
   const synced =
     fetcher.data && "synced" in fetcher.data ? fetcher.data.synced : null;
 
-  const submitSync = (intent: string) => {
-    const start = (document.getElementById("sync-start") as HTMLInputElement)
-      ?.value;
-    const end = (document.getElementById("sync-end") as HTMLInputElement)?.value;
-    fetcher.submit({ intent, start, end }, { method: "post" });
+  const [pickedType, setPickedType] = useState(type);
+  const [pickedPreset, setPickedPreset] = useState(preset);
+  const [customStart, setCustomStart] = useState(range.start);
+  const [customEnd, setCustomEnd] = useState(range.end);
+  const [exporting, setExporting] = useState(false);
+
+  const currentParams = () => {
+    const params: Record<string, string> = {
+      type: pickedType,
+      preset: pickedPreset,
+    };
+    if (pickedPreset === "custom") {
+      params.start = customStart;
+      params.end = customEnd;
+    }
+    return params;
   };
+
+  const exportXlsx = async () => {
+    setExporting(true);
+    try {
+      const query = new URLSearchParams(currentParams()).toString();
+      const response = await fetch(`/app/analytics/export?${query}`);
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      link.download =
+        disposition.match(/filename="(.+)"/)?.[1] ?? "report.xlsx";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const reportTitle =
+    type === "weekly"
+      ? "Weekly meeting report"
+      : (productSelling
+          ? `Product selling — ${productSelling.scope.label}`
+          : "Report");
+  const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? null;
 
   return (
     <s-page heading="Analytics">
@@ -247,6 +359,104 @@ export default function Analytics() {
           {`Reading data for ${override} (ANALYTICS_SHOP_OVERRIDE) — syncs disabled.`}
         </s-banner>
       )}
+
+      <s-section heading="Report" accessibilityLabel="Report picker">
+        <s-stack direction="block" gap="base">
+          <s-stack direction="inline" gap="small" alignItems="end">
+            <s-select
+              label="Report type"
+              value={pickedType}
+              onChange={(event) =>
+                setPickedType((event.target as HTMLSelectElement).value)
+              }
+            >
+              <s-option value="weekly">Weekly meeting report</s-option>
+              {PRODUCT_REPORT_SCOPES.map((scope) => (
+                <s-option key={scope.key} value={`product-${scope.key}`}>
+                  {`Product selling — ${scope.label}`}
+                </s-option>
+              ))}
+            </s-select>
+            <s-select
+              label="Period"
+              value={pickedPreset}
+              onChange={(event) =>
+                setPickedPreset((event.target as HTMLSelectElement).value)
+              }
+            >
+              {PRESETS.map((p) => (
+                <s-option key={p.value} value={p.value}>
+                  {p.label}
+                </s-option>
+              ))}
+            </s-select>
+            {pickedPreset === "custom" && (
+              <>
+                <s-text-field
+                  label="From"
+                  value={customStart}
+                  placeholder="YYYY-MM-DD"
+                  onInput={(event) =>
+                    setCustomStart((event.target as HTMLInputElement).value)
+                  }
+                />
+                <s-text-field
+                  label="To"
+                  value={customEnd}
+                  placeholder="YYYY-MM-DD"
+                  onInput={(event) =>
+                    setCustomEnd((event.target as HTMLInputElement).value)
+                  }
+                />
+              </>
+            )}
+            <s-button
+              variant="primary"
+              onClick={() => setSearchParams(currentParams())}
+            >
+              View
+            </s-button>
+            <s-button
+              disabled={exporting || lineCount === 0}
+              loading={exporting}
+              onClick={() => void exportXlsx()}
+            >
+              Export .xlsx
+            </s-button>
+          </s-stack>
+          <s-text color="subdued">
+            {`Showing ${range.start} → ${range.end}${
+              lyRange
+                ? ` · compared to ${lyRange.start} → ${lyRange.end}${
+                    type === "weekly" ? " (weekday-aligned)" : " (calendar LY)"
+                  }`
+                : ""
+            }`}
+          </s-text>
+        </s-stack>
+      </s-section>
+
+      <s-section
+        heading={reportTitle}
+        accessibilityLabel="Report"
+        padding="none"
+      >
+        {weekly ? (
+          <s-stack direction="block" gap="base">
+            <ChannelBlock report={weekly} />
+            <CategoryBlock report={weekly} />
+          </s-stack>
+        ) : productSelling ? (
+          <ProductSellingBlock report={productSelling} />
+        ) : (
+          <s-box padding="base">
+            <s-paragraph>
+              No data yet — run the syncs below, then reload.
+            </s-paragraph>
+          </s-box>
+        )}
+      </s-section>
+
       <s-section heading="Data sync" accessibilityLabel="Data sync">
         <s-stack direction="block" gap="base">
           <s-paragraph>
@@ -268,14 +478,32 @@ export default function Analytics() {
             <s-button
               disabled={busy}
               loading={busy}
-              onClick={() => submitSync("sync-square")}
+              onClick={() =>
+                fetcher.submit(
+                  {
+                    intent: "sync-square",
+                    start: (document.getElementById("sync-start") as HTMLInputElement)?.value,
+                    end: (document.getElementById("sync-end") as HTMLInputElement)?.value,
+                  },
+                  { method: "post" },
+                )
+              }
             >
               Sync Square
             </s-button>
             <s-button
               disabled={busy}
               loading={busy}
-              onClick={() => submitSync("sync-shopify")}
+              onClick={() =>
+                fetcher.submit(
+                  {
+                    intent: "sync-shopify",
+                    start: (document.getElementById("sync-start") as HTMLInputElement)?.value,
+                    end: (document.getElementById("sync-end") as HTMLInputElement)?.value,
+                  },
+                  { method: "post" },
+                )
+              }
             >
               Sync Shopify
             </s-button>
@@ -294,30 +522,6 @@ export default function Analytics() {
             </s-text>
           ))}
         </s-stack>
-      </s-section>
-
-      <s-section
-        heading={`Weekly report · ${range.start} → ${range.end}`}
-        accessibilityLabel="Weekly report"
-        padding="none"
-      >
-        {report ? (
-          <s-stack direction="block" gap="base">
-            <s-box padding="base">
-              <s-text color="subdued">
-                {`Compared to ${report.lyRange.start} → ${report.lyRange.end} (weekday-aligned last year). Change the window with ?start=YYYY-MM-DD&end=YYYY-MM-DD.`}
-              </s-text>
-            </s-box>
-            <ChannelBlock report={report} />
-            <CategoryBlock report={report} />
-          </s-stack>
-        ) : (
-          <s-box padding="base">
-            <s-paragraph>
-              No data yet — run the syncs above, then reload.
-            </s-paragraph>
-          </s-box>
-        )}
       </s-section>
     </s-page>
   );
