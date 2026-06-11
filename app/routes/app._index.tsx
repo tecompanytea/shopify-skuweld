@@ -1,10 +1,18 @@
+import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import {
+  useFetcher,
+  useLoaderData,
+  useRouteError,
+  useSearchParams,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getSquareConnection } from "../.server/square/client";
+import { squareConnectionAction } from "../.server/square/connection-action";
 
 // Dashboard reads only the local DB so it stays fast; the Products and
 // Parity pages do the live channel fetches.
@@ -33,17 +41,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ? {
           connected: true as const,
           merchantName: connection.merchantName ?? connection.merchantId,
+          merchantId: connection.merchantId,
+          // Formatted server-side so SSR and hydration agree on the locale.
+          connectedSince: connection.createdAt.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            timeZone: "UTC",
+          }),
         }
       : { connected: false as const },
     stats: { total, inBoth, shopifyOnly, squareOnly, clean },
   };
 };
 
+export const action = squareConnectionAction;
+
 export const headers: HeadersFunction = (headersArgs) =>
   boundary.headers(headersArgs);
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }
+
+const DISCONNECT_MODAL_ID = "square-disconnect-modal";
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
@@ -58,28 +78,138 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 export default function Index() {
   const { square, stats } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
+  const shopify = useAppBridge();
+  const [searchParams] = useSearchParams();
+  const squareStatus = searchParams.get("square");
+
+  // The Square consent page can't render inside the admin iframe; App Bridge
+  // turns this into a sanctioned top-level redirect.
+  useEffect(() => {
+    const authorizeUrl =
+      fetcher.data && "authorizeUrl" in fetcher.data
+        ? fetcher.data.authorizeUrl
+        : null;
+    if (authorizeUrl) {
+      window.open(authorizeUrl, "_top");
+    }
+  }, [fetcher.data]);
+
+  useEffect(() => {
+    if (fetcher.data && "disconnected" in fetcher.data) {
+      shopify.toast.show("Square disconnected");
+    }
+  }, [fetcher.data, shopify]);
+
+  useEffect(() => {
+    if (squareStatus === "connected") {
+      shopify.toast.show("Square connected");
+    }
+  }, [squareStatus, shopify]);
+
+  const busy = fetcher.state !== "idle";
 
   return (
     <s-page heading="Skuweld">
-      <s-section heading="Connections">
+      <s-section accessibilityLabel="Square connection">
+        {squareStatus === "denied" && (
+          <s-banner tone="warning">
+            Square access was denied. Connect again when you are ready.
+          </s-banner>
+        )}
+        {squareStatus === "error" && (
+          <s-banner tone="critical">
+            Something went wrong connecting Square. Please try again.
+          </s-banner>
+        )}
+
         <s-stack direction="block" gap="base">
-          <s-stack direction="inline" gap="base" alignItems="center">
-            <s-badge tone="success">Shopify connected</s-badge>
+          <s-grid
+            gridTemplateColumns="auto 1fr auto"
+            gap="small-200"
+            alignItems="center"
+          >
+            <s-grid-item>
+              <s-thumbnail src="/square-logo.png" alt="Square logo" size="small" />
+            </s-grid-item>
+            <s-grid-item>
+              <s-heading>Square</s-heading>
+            </s-grid-item>
+            <s-grid-item>
+              {square.connected ? (
+                <s-badge tone="success">Connected</s-badge>
+              ) : (
+                <s-badge tone="warning">Not connected</s-badge>
+              )}
+            </s-grid-item>
+          </s-grid>
+
+          {square.connected ? (
+            <s-stack direction="block" gap="small-300">
+              <s-text type="strong">{square.merchantName}</s-text>
+              <s-text color="subdued">
+                {`Merchant ID ${square.merchantId} · Connected since ${square.connectedSince}`}
+              </s-text>
+            </s-stack>
+          ) : (
+            <s-text color="subdued">
+              Connect to compare your Square catalog and inventory with
+              Shopify. You will approve read-only access on Square.
+            </s-text>
+          )}
+
+          <s-stack direction="inline" justifyContent="end">
             {square.connected ? (
-              <s-badge tone="success">
-                {`Square: ${square.merchantName}`}
-              </s-badge>
+              <s-button
+                tone="critical"
+                disabled={busy}
+                commandFor={DISCONNECT_MODAL_ID}
+                command="--show"
+              >
+                Disconnect
+              </s-button>
             ) : (
-              <s-badge tone="warning">Square not connected</s-badge>
+              <s-button
+                variant="primary"
+                disabled={busy}
+                loading={busy}
+                onClick={() =>
+                  fetcher.submit({ intent: "connect" }, { method: "post" })
+                }
+              >
+                Connect
+              </s-button>
             )}
           </s-stack>
-          {!square.connected && (
-            <s-paragraph>
-              <s-link href="/app/settings">Connect Square in Settings</s-link>{" "}
-              to start comparing catalogs.
-            </s-paragraph>
-          )}
         </s-stack>
+
+        {square.connected && (
+          <s-modal id={DISCONNECT_MODAL_ID} heading="Disconnect Square?">
+            <s-paragraph>
+              Skuweld will stop comparing catalogs until you reconnect. Your
+              saved SKU list is kept.
+            </s-paragraph>
+            <s-button
+              slot="primary-action"
+              variant="primary"
+              tone="critical"
+              commandFor={DISCONNECT_MODAL_ID}
+              command="--hide"
+              onClick={() =>
+                fetcher.submit({ intent: "disconnect" }, { method: "post" })
+              }
+            >
+              Disconnect
+            </s-button>
+            <s-button
+              slot="secondary-actions"
+              commandFor={DISCONNECT_MODAL_ID}
+              command="--hide"
+            >
+              Cancel
+            </s-button>
+          </s-modal>
+        )}
       </s-section>
 
       <s-section heading="SKU parity at a glance">
@@ -87,7 +217,8 @@ export default function Index() {
           <s-paragraph>
             No SKUs in the master list yet. Visit{" "}
             <s-link href="/app/skus">SKUs</s-link> and run “Sync SKUs”, or
-            browse <s-link href="/app/products">Products</s-link> and{" "}
+            browse <s-link href="/app/products-shopify">Shopify Products</s-link>{" "}
+            and{" "}
             <s-link href="/app/parity">Parity</s-link> for live views.
           </s-paragraph>
         ) : (

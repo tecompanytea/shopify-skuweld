@@ -8,14 +8,15 @@ import prisma from "../db.server";
 
 // Public, non-embedded route: Square redirects here top-level after the
 // merchant approves (or denies) access on the consent page. We then send
-// the browser back into the embedded app inside the Shopify admin.
-function settingsUrl(shop: string, params: Record<string, string> = {}) {
+// the browser back to the dashboard inside the Shopify admin, which hosts
+// the Square connection card.
+function dashboardUrl(shop: string, params: Record<string, string> = {}) {
   const storeHandle = shop.replace(/\.myshopify\.com$/i, "");
   const appHandle = process.env.SHOPIFY_APP_HANDLE || "skuweld";
   const search = new URLSearchParams(params).toString();
   return (
     `https://admin.shopify.com/store/${encodeURIComponent(storeHandle)}` +
-    `/apps/${encodeURIComponent(appHandle)}/app/settings` +
+    `/apps/${encodeURIComponent(appHandle)}/app` +
     (search ? `?${search}` : "")
   );
 }
@@ -34,7 +35,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (error || !code) {
     return redirect(
-      settingsUrl(shop, { square: error === "access_denied" ? "denied" : "error" }),
+      dashboardUrl(shop, { square: error === "access_denied" ? "denied" : "error" }),
     );
   }
 
@@ -55,5 +56,5 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.error("Failed to fetch Square merchant profile", enrichError);
   }
 
-  return redirect(settingsUrl(shop, { square: "connected" }));
+  return redirect(dashboardUrl(shop, { square: "connected" }));
 };
