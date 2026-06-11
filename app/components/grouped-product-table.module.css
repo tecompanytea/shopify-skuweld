@@ -1,0 +1,15 @@
+/* s-text type="strong" doesn't apply inside s-table cells, so the bold
+   product title is styled directly. 650 matches Polaris semibold. */
+.productTitle {
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* Inside the variants chip: keep "N variants" and the chevron on one line,
+   as one unit (the chip's own content layout wraps them otherwise). */
+.chipContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}

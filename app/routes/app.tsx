@@ -20,7 +20,8 @@ export default function App() {
     <AppProvider embedded apiKey={apiKey}>
       <NavMenu>
         <a href="/app" rel="home">Home</a>
-        <a href="/app/products">Products</a>
+        <a href="/app/products-shopify">Shopify Products</a>
+        <a href="/app/products-square">Square Products</a>
         <a href="/app/parity">Parity</a>
         <a href="/app/skus">SKUs</a>
         <a href="/app/settings">Settings</a>

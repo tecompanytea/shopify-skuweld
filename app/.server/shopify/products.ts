@@ -2,6 +2,8 @@
 export interface ShopifyProductRow {
   productGid: string;
   productTitle: string;
+  productCreatedAt: string;
+  productImageUrl: string | null;
   status: string;
   variantGid: string;
   variantTitle: string;
@@ -15,6 +17,10 @@ interface ProductsQueryResult {
       nodes: Array<{
         id: string;
         title: string;
+        createdAt: string;
+        featuredMedia: {
+          preview: { image: { url: string } | null } | null;
+        } | null;
         status: string;
         variants: {
           nodes: Array<{
@@ -45,6 +51,14 @@ const PRODUCTS_QUERY = `#graphql
       nodes {
         id
         title
+        createdAt
+        featuredMedia {
+          preview {
+            image {
+              url(transform: { maxWidth: 120, maxHeight: 120 })
+            }
+          }
+        }
         status
         variants(first: 100) {
           nodes {
@@ -83,6 +97,8 @@ export async function listShopifyProducts(
         rows.push({
           productGid: product.id,
           productTitle: product.title,
+          productCreatedAt: product.createdAt,
+          productImageUrl: product.featuredMedia?.preview?.image?.url ?? null,
           status: product.status,
           variantGid: variant.id,
           variantTitle: variant.title,
