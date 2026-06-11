@@ -4,6 +4,7 @@ export interface ShopifyProductRow {
   productTitle: string;
   productCreatedAt: string;
   productImageUrl: string | null;
+  productType: string;
   status: string;
   variantGid: string;
   variantTitle: string;
@@ -21,6 +22,7 @@ interface ProductsQueryResult {
         featuredMedia: {
           preview: { image: { url: string } | null } | null;
         } | null;
+        productType: string;
         status: string;
         variants: {
           nodes: Array<{
@@ -59,6 +61,7 @@ const PRODUCTS_QUERY = `#graphql
             }
           }
         }
+        productType
         status
         variants(first: 100) {
           nodes {
@@ -99,6 +102,7 @@ export async function listShopifyProducts(
           productTitle: product.title,
           productCreatedAt: product.createdAt,
           productImageUrl: product.featuredMedia?.preview?.image?.url ?? null,
+          productType: product.productType,
           status: product.status,
           variantGid: variant.id,
           variantTitle: variant.title,

@@ -4,7 +4,6 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { listSquareProducts } from "../.server/square/catalog";
-import { getInventoryCounts } from "../.server/square/inventory";
 import {
   getSquareConnection,
   SquareNotConnectedError,
@@ -23,16 +22,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (squareConnected) {
     try {
       const catalog = await listSquareProducts(session.shop);
-      const counts = await getInventoryCounts(
-        session.shop,
-        catalog.map((row) => row.variationId),
-      );
       products = groupProducts(
         catalog.map((row) => ({
           productId: row.itemId,
           productTitle: row.itemName,
           productCreatedAt: row.itemCreatedAt,
           productImageUrl: row.itemImageUrl,
+          productType: row.categoryName,
           variant: {
             id: row.variationId,
             name:
@@ -40,7 +36,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 ? row.variationName
                 : null,
             sku: row.sku,
-            inventory: counts.get(row.variationId) ?? 0,
           },
         })),
       );

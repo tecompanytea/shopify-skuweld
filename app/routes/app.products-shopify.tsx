@@ -19,11 +19,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       productTitle: row.productTitle,
       productCreatedAt: row.productCreatedAt,
       productImageUrl: row.productImageUrl,
+      productType: row.productType || null,
       variant: {
         id: row.variantGid,
         name: row.variantTitle === "Default Title" ? null : row.variantTitle,
         sku: row.sku,
-        inventory: row.inventoryQuantity,
       },
     })),
   );

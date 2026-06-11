@@ -22,8 +22,7 @@ export default function App() {
         <a href="/app" rel="home">Home</a>
         <a href="/app/products-shopify">Shopify Products</a>
         <a href="/app/products-square">Square Products</a>
-        <a href="/app/parity">Parity</a>
-        <a href="/app/skus">SKUs</a>
+        <a href="/app/sku-mapping">SKU Mapping</a>
         <a href="/app/settings">Settings</a>
       </NavMenu>
       <Outlet />

@@ -15,13 +15,14 @@ export interface VariantRow {
   // null means the channel's default variant name — not worth displaying.
   name: string | null;
   sku: string | null;
-  inventory: number;
 }
 
 export interface ProductGroup {
   id: string;
   title: string;
   imageUrl: string | null;
+  // Shopify product type / Square category name; null when unset.
+  productType: string | null;
   // Epoch millis; 0 when the channel didn't report a creation date.
   createdAt: number;
   variants: VariantRow[];
@@ -33,6 +34,7 @@ export function groupProducts(
     productTitle: string;
     productCreatedAt: string | null;
     productImageUrl: string | null;
+    productType: string | null;
     variant: VariantRow;
   }>,
 ): ProductGroup[] {
@@ -47,6 +49,7 @@ export function groupProducts(
         id: row.productId,
         title: row.productTitle,
         imageUrl: row.productImageUrl,
+        productType: row.productType,
         createdAt: Number.isNaN(created) ? 0 : created,
         variants: [],
       };
@@ -55,10 +58,6 @@ export function groupProducts(
     group.variants.push(row.variant);
   }
   return [...groups.values()];
-}
-
-function totalInventory(product: ProductGroup): number {
-  return product.variants.reduce((sum, variant) => sum + variant.inventory, 0);
 }
 
 // Parent rows summarize their variants' SKUs: the shared prefix with the
@@ -89,7 +88,7 @@ function domId(prefix: string, id: string): string {
 
 const PAGE_SIZE = 50;
 
-type SortField = "created" | "name" | "inventory";
+type SortField = "created" | "name";
 type SortDirection = "asc" | "desc";
 
 const SORT_FIELDS: Array<{
@@ -112,12 +111,6 @@ const SORT_FIELDS: Array<{
     directionLabels: { asc: "A–Z", desc: "Z–A" },
     defaultDirection: "asc",
   },
-  {
-    field: "inventory",
-    label: "Inventory",
-    directionLabels: { asc: "Lowest first", desc: "Highest first" },
-    defaultDirection: "desc",
-  },
 ];
 
 function sortFieldConfig(field: SortField) {
@@ -133,12 +126,10 @@ function compareProducts(
   const result =
     field === "created"
       ? a.createdAt - b.createdAt
-      : field === "inventory"
-        ? totalInventory(a) - totalInventory(b)
-        : a.title.localeCompare(b.title, undefined, {
-            numeric: true,
-            sensitivity: "base",
-          });
+      : a.title.localeCompare(b.title, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
   return direction === "desc" ? -result : result;
 }
 
@@ -171,13 +162,10 @@ function SortableHeaderLabel({
   field,
   sort,
   onSort,
-  align = "start",
 }: {
   field: SortField;
   sort: { field: SortField; direction: SortDirection };
   onSort: (field: SortField, direction: SortDirection) => void;
-  // "end" for numeric columns, whose cells are right-aligned.
-  align?: "start" | "end";
 }) {
   const [hovered, setHovered] = useState(false);
   const config = sortFieldConfig(field);
@@ -214,9 +202,7 @@ function SortableHeaderLabel({
         alignItems: "center",
         gap: "4px",
         whiteSpace: "nowrap",
-        ...(align === "end"
-          ? { display: "flex", width: "100%", justifyContent: "flex-end" }
-          : { display: "inline-flex" }),
+        display: "inline-flex",
       }}
     >
       {config.label === "Product name" ? "Product" : config.label}
@@ -271,6 +257,7 @@ export function GroupedProductTable({
     ? products.filter((product) =>
         [
           product.title,
+          product.productType ?? "",
           ...product.variants.flatMap((variant) => [
             variant.name ?? "",
             variant.sku ?? "",
@@ -415,10 +402,14 @@ export function GroupedProductTable({
           {/* Header and cells share the same stack + gap so the "Product"
               label lines up exactly with the row photos. */}
           <s-stack direction="inline" gap="small" alignItems="center">
+            {/* checked/indeterminate are spread only when true: passing
+                checked={false} server-renders a checked="false" attribute,
+                which a custom element reads as checked — every box would
+                flash checked on page load before hydration corrects it. */}
             <s-checkbox
               accessibilityLabel="Select all products"
-              checked={allVisibleSelected}
-              indeterminate={someVisibleSelected}
+              {...(allVisibleSelected ? { checked: true } : {})}
+              {...(someVisibleSelected ? { indeterminate: true } : {})}
               onChange={(event) =>
                 setVisibleSelected(event.currentTarget.checked)
               }
@@ -427,14 +418,7 @@ export function GroupedProductTable({
           </s-stack>
         </s-table-header>
         <s-table-header listSlot="secondary">SKU</s-table-header>
-        <s-table-header format="numeric" listSlot="labeled">
-          <SortableHeaderLabel
-            field="inventory"
-            sort={sort}
-            onSort={applySort}
-            align="end"
-          />
-        </s-table-header>
+        <s-table-header listSlot="labeled">Product type</s-table-header>
       </s-table-header-row>
       <s-table-body>
         {visible.length === 0 ? (
@@ -454,7 +438,7 @@ export function GroupedProductTable({
               <s-checkbox
                 id={checkboxId}
                 accessibilityLabel={`Select ${product.title}`}
-                checked={selected.has(product.id)}
+                {...(selected.has(product.id) ? { checked: true } : {})}
                 onChange={(event) =>
                   setProductSelected(product.id, event.currentTarget.checked)
                 }
@@ -479,7 +463,7 @@ export function GroupedProductTable({
                     </s-stack>
                   </s-table-cell>
                   <s-table-cell>{variant.sku ?? "—"}</s-table-cell>
-                  <s-table-cell>{variant.inventory}</s-table-cell>
+                  <s-table-cell>{product.productType ?? "—"}</s-table-cell>
                 </s-table-row>,
               ];
             }
@@ -515,7 +499,7 @@ export function GroupedProductTable({
                   </s-stack>
                 </s-table-cell>
                 <s-table-cell>{skuPattern(product) ?? "—"}</s-table-cell>
-                <s-table-cell>{totalInventory(product)}</s-table-cell>
+                <s-table-cell>{product.productType ?? "—"}</s-table-cell>
               </s-table-row>
             );
 
@@ -532,7 +516,7 @@ export function GroupedProductTable({
                     </s-box>
                   </s-table-cell>
                   <s-table-cell>{variant.sku ?? "—"}</s-table-cell>
-                  <s-table-cell>{variant.inventory}</s-table-cell>
+                  <s-table-cell />
                 </s-table-row>
               )),
             ];

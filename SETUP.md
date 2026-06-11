@@ -70,8 +70,7 @@ go to **Settings → Connect Square**, and approve on Square's consent page.
 
 ## 6. Verify
 
-- Dashboard shows "Square: <your business name>".
-- Products page lists both catalogs with inventory.
-- Parity page buckets match a spot check.
-- SKUs → "Sync SKUs" populates the master list; re-running it creates no dupes.
-- Settings → Disconnect removes the app under Square Dashboard → authorized apps.
+- Dashboard shows the Square card as Connected with your business name.
+- Products pages list both catalogs with inventory.
+- SKU Mapping buckets (in both / Shopify only / Square only) match a spot check.
+- Disconnect (dashboard or Settings) removes the app under Square Dashboard → authorized apps.

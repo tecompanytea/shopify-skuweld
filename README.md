@@ -1,21 +1,18 @@
 # Skuweld
 
 Embedded Shopify admin app that connects a Shopify store with a Square account
-for **product parity by SKU**: see which products live on which channel, keep a
-master list of SKUs, and enforce SKU naming rules.
+for **product parity by SKU**: see which products live on which channel and
+which are missing from one.
 
 ## What it does (v1)
 
 - **Connect Square** via OAuth — the merchant sees Square's
   "Skuweld wants access to your Square Account" consent page (read-only scopes:
   `ITEMS_READ`, `INVENTORY_READ`, `MERCHANT_PROFILE_READ`).
-- **Products** — side-by-side tables of Shopify and Square products with
+- **Products** — per-channel tables of Shopify and Square products with
   name, inventory, and channel.
-- **Parity** — SKU matching across channels: in both / Shopify only / Square
-  only, with duplicate-SKU warnings.
-- **SKUs** — persisted master list (union of every SKU seen on either channel),
-  a clean list, and configurable naming rules (regex, prefix, length, no
-  spaces, digits only, uppercase).
+- **SKU Mapping** — live SKU matching across channels: in both / Shopify only
+  / Square only, with duplicate-SKU warnings.
 
 Planned next: Square locations, per-location analytics, Create Product pushed
 to both channels.
@@ -32,7 +29,7 @@ are AES-256-GCM encrypted at rest and refreshed on use.
 ```bash
 npm install
 npm run dev          # shopify app dev (needs `shopify app config link` once)
-npm test             # vitest unit tests (sku rules, parity)
+npm test             # vitest unit tests (parity matching)
 npm run typecheck
 ```
 

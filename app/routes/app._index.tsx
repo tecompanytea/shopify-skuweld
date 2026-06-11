@@ -10,31 +10,14 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
 import { getSquareConnection } from "../.server/square/client";
 import { squareConnectionAction } from "../.server/square/connection-action";
 
 // Dashboard reads only the local DB so it stays fast; the Products and
-// Parity pages do the live channel fetches.
+// SKU Mapping pages do the live channel fetches.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-
-  const [connection, total, inBoth, shopifyOnly, squareOnly, clean] =
-    await Promise.all([
-      getSquareConnection(shop),
-      prisma.sku.count({ where: { shop } }),
-      prisma.sku.count({
-        where: { shop, presentInShopify: true, presentInSquare: true },
-      }),
-      prisma.sku.count({
-        where: { shop, presentInShopify: true, presentInSquare: false },
-      }),
-      prisma.sku.count({
-        where: { shop, presentInShopify: false, presentInSquare: true },
-      }),
-      prisma.sku.count({ where: { shop, isClean: true } }),
-    ]);
+  const connection = await getSquareConnection(session.shop);
 
   return {
     square: connection
@@ -51,7 +34,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }),
         }
       : { connected: false as const },
-    stats: { total, inBoth, shopifyOnly, squareOnly, clean },
   };
 };
 
@@ -65,19 +47,8 @@ export function ErrorBoundary() {
 
 const DISCONNECT_MODAL_ID = "square-disconnect-modal";
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <s-box padding="base" borderWidth="base" borderRadius="base">
-      <s-stack direction="block" gap="small-200">
-        <s-text color="subdued">{label}</s-text>
-        <s-heading>{String(value)}</s-heading>
-      </s-stack>
-    </s-box>
-  );
-}
-
 export default function Index() {
-  const { square, stats } = useLoaderData<typeof loader>();
+  const { square } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const [searchParams] = useSearchParams();
@@ -125,62 +96,58 @@ export default function Index() {
 
         <s-stack direction="block" gap="base">
           <s-grid
-            gridTemplateColumns="auto 1fr auto"
-            gap="small-200"
+            gridTemplateColumns="1fr auto"
+            gap="base"
             alignItems="center"
           >
             <s-grid-item>
-              <s-thumbnail src="/square-logo.png" alt="Square logo" size="small" />
-            </s-grid-item>
-            <s-grid-item>
-              <s-heading>Square</s-heading>
+              <s-stack direction="block" gap="small-200">
+                <s-stack direction="inline" gap="small-200" alignItems="center">
+                  <s-heading>Square</s-heading>
+                  {square.connected ? (
+                    <s-badge tone="success">Connected</s-badge>
+                  ) : (
+                    <s-badge tone="warning">Not connected</s-badge>
+                  )}
+                </s-stack>
+                {square.connected && (
+                  <s-text color="subdued">
+                    {`Connected as ${square.merchantName}`}
+                  </s-text>
+                )}
+              </s-stack>
             </s-grid-item>
             <s-grid-item>
               {square.connected ? (
-                <s-badge tone="success">Connected</s-badge>
+                <s-button
+                  variant="secondary"
+                  tone="critical"
+                  disabled={busy}
+                  commandFor={DISCONNECT_MODAL_ID}
+                  command="--show"
+                >
+                  Disconnect
+                </s-button>
               ) : (
-                <s-badge tone="warning">Not connected</s-badge>
+                <s-button
+                  variant="primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() =>
+                    fetcher.submit({ intent: "connect" }, { method: "post" })
+                  }
+                >
+                  Connect
+                </s-button>
               )}
             </s-grid-item>
           </s-grid>
 
-          {square.connected ? (
-            <s-stack direction="block" gap="small-300">
-              <s-text type="strong">{square.merchantName}</s-text>
-              <s-text color="subdued">
-                {`Merchant ID ${square.merchantId} · Connected since ${square.connectedSince}`}
-              </s-text>
-            </s-stack>
-          ) : (
-            <s-text color="subdued">
-              Connect to compare your Square catalog and inventory with
-              Shopify. You will approve read-only access on Square.
-            </s-text>
-          )}
-
-          <s-stack direction="inline" justifyContent="end">
-            {square.connected ? (
-              <s-button
-                tone="critical"
-                disabled={busy}
-                commandFor={DISCONNECT_MODAL_ID}
-                command="--show"
-              >
-                Disconnect
-              </s-button>
-            ) : (
-              <s-button
-                variant="primary"
-                disabled={busy}
-                loading={busy}
-                onClick={() =>
-                  fetcher.submit({ intent: "connect" }, { method: "post" })
-                }
-              >
-                Connect
-              </s-button>
-            )}
-          </s-stack>
+          <s-text color="subdued">
+            {square.connected
+              ? `Merchant ID ${square.merchantId} · Connected since ${square.connectedSince}`
+              : "Connect to compare your Square catalog with Shopify. You will approve read-only access on Square."}
+          </s-text>
         </s-stack>
 
         {square.connected && (
@@ -209,29 +176,6 @@ export default function Index() {
               Cancel
             </s-button>
           </s-modal>
-        )}
-      </s-section>
-
-      <s-section heading="SKU parity at a glance">
-        {stats.total === 0 ? (
-          <s-paragraph>
-            No SKUs in the master list yet. Visit{" "}
-            <s-link href="/app/skus">SKUs</s-link> and run “Sync SKUs”, or
-            browse <s-link href="/app/products-shopify">Shopify Products</s-link>{" "}
-            and{" "}
-            <s-link href="/app/parity">Parity</s-link> for live views.
-          </s-paragraph>
-        ) : (
-          <s-grid
-            gridTemplateColumns="repeat(auto-fit, minmax(140px, 1fr))"
-            gap="base"
-          >
-            <Stat label="Total SKUs" value={stats.total} />
-            <Stat label="In both channels" value={stats.inBoth} />
-            <Stat label="Shopify only" value={stats.shopifyOnly} />
-            <Stat label="Square only" value={stats.squareOnly} />
-            <Stat label="Clean" value={stats.clean} />
-          </s-grid>
         )}
       </s-section>
     </s-page>

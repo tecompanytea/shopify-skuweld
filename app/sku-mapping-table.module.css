@@ -1,0 +1,22 @@
+/* Scope popover rows (All/Both/Shopify only/Square only/Review). Reserve a
+   check column so labels line up; the selected row shows its check, others
+   reveal a subdued check on hover. Same pattern as the classes app. */
+.scopeOption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scopeCheck {
+  display: inline-flex;
+  visibility: hidden;
+}
+
+.scopeCheckSelected,
+s-clickable:hover .scopeCheck {
+  visibility: visible;
+}
+
+.scopeLabelSelected {
+  font-weight: 600;
+}
