@@ -56,15 +56,33 @@ const to = arg("to") ?? toReportDay(new Date()).slice(0, 7);
 const [fromY, fromM] = from.split("-").map(Number);
 const [toY, toM] = to.split("-").map(Number);
 
+// --only=square|shopify restricts the run. Square goes month-by-month (its
+// API filters cheaply per window); Shopify goes as ONE range — each Shopify
+// call scans a year before the window for edit-agreements, so month chunks
+// would rescan the same orders 12+ times and invite throttling.
+const only = arg("only");
+
 console.log(`Backfilling ${shop}: ${from} → ${to}\n`);
 let totalLines = 0;
-for (let y = fromY, m = fromM; y < toY || (y === toY && m <= toM); m === 12 ? (y++, (m = 1)) : m++) {
-  const range = monthRange(y, m);
-  const sq = await syncSquareOrders(shop, range);
-  const sh = await syncShopifyOrders(shop, admin, range);
-  totalLines += sq.lines + sh.lines;
+if (only !== "shopify") {
+  for (let y = fromY, m = fromM; y < toY || (y === toY && m <= toM); m === 12 ? (y++, (m = 1)) : m++) {
+    const range = monthRange(y, m);
+    const sq = await syncSquareOrders(shop, range);
+    totalLines += sq.lines;
+    console.log(
+      `square ${range.start} → ${range.end}: ${sq.orders} orders / ${sq.lines} lines`,
+    );
+  }
+}
+if (only !== "square") {
+  const fullRange = {
+    start: monthRange(fromY, fromM).start,
+    end: monthRange(toY, toM).end,
+  };
+  const sh = await syncShopifyOrders(shop, admin, fullRange);
+  totalLines += sh.lines;
   console.log(
-    `${range.start} → ${range.end}: square ${sq.orders} orders/${sq.lines} lines · shopify ${sh.orders} orders/${sh.lines} lines`,
+    `shopify ${fullRange.start} → ${fullRange.end}: ${sh.orders} orders / ${sh.lines} lines`,
   );
 }
 console.log(`\nDone. ${totalLines} total lines.`);

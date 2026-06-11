@@ -38,6 +38,7 @@ interface SaleNode {
 }
 
 interface OrdersQueryResult {
+  errors?: Array<{ message?: string; extensions?: { code?: string } }>;
   data?: {
     orders: {
       nodes: Array<{
@@ -133,13 +134,35 @@ export async function syncShopifyOrders(
     let after: string | null = null;
     let hasNextPage = true;
 
+    let throttleRetries = 0;
     while (hasNextPage) {
       const response = await admin.graphql(ORDERS_QUERY, {
         variables: { first: 100, after, search },
       });
       const json = (await response.json()) as OrdersQueryResult;
+
+      // Errors must never read as "no more data" — that would silently
+      // truncate the sync (and the delete+insert would wipe the window).
+      if (json.errors?.length) {
+        const throttled = json.errors.some(
+          (e) => e.extensions?.code === "THROTTLED",
+        );
+        if (throttled && throttleRetries < 10) {
+          throttleRetries += 1;
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          continue; // retry the same page
+        }
+        throw new Error(
+          `Shopify GraphQL errors: ${json.errors
+            .map((e) => e.message ?? e.extensions?.code)
+            .join("; ")}`,
+        );
+      }
+      throttleRetries = 0;
       const orders = json.data?.orders;
-      if (!orders) break;
+      if (!orders) {
+        throw new Error("Shopify GraphQL returned no data and no errors");
+      }
 
       for (const order of orders.nodes) {
         if (order.test) continue;
