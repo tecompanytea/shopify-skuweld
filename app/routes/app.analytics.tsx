@@ -30,7 +30,7 @@ import {
   computeProductSellingReport,
   type ProductSellingReport,
 } from "../.server/analytics/product-selling-report";
-import { PRODUCT_REPORT_SCOPES } from "../.server/analytics/categories";
+import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 import type { DayRange } from "../.server/analytics/periods";
 
 const PRESETS = [

@@ -1,5 +1,8 @@
 import prisma from "../../db.server";
-import { PRODUCT_REPORT_SCOPES, type ProductReportScope } from "./categories";
+import {
+  PRODUCT_REPORT_SCOPES,
+  type ProductReportScope,
+} from "../../lib/analytics-scopes";
 import { calendarLastYear, type DayRange } from "./periods";
 
 // Product-selling report: every product in one category, net sales + units,

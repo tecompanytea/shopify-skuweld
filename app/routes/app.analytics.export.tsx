@@ -9,7 +9,7 @@ import {
   buildProductSellingWorkbook,
   buildAllReportsWorkbook,
 } from "../.server/analytics/export-xlsx";
-import { PRODUCT_REPORT_SCOPES } from "../.server/analytics/categories";
+import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 
 // Resource route: GET /app/analytics/export?type=...&start=...&end=...
 // Returns the report as an .xlsx download. Called via App Bridge fetch
