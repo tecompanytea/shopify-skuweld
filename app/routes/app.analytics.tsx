@@ -624,7 +624,7 @@ export default function Analytics() {
             <s-text-field
               id="sync-start"
               label="From"
-              defaultValue="2025-01-01"
+              defaultValue={range.start}
               placeholder="YYYY-MM-DD"
             />
             <s-text-field
