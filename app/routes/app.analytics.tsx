@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -7,6 +7,7 @@ import type {
 import {
   useFetcher,
   useLoaderData,
+  useRevalidator,
   useRouteError,
   useSearchParams,
 } from "react-router";
@@ -430,6 +431,17 @@ export default function Analytics() {
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
+  const revalidator = useRevalidator();
+
+  // While a sync runs, re-read the loader so the live progress written to
+  // SyncState ("1,396 orders, 3,532 lines so far…") streams into the page.
+  useEffect(() => {
+    if (!busy) return;
+    const interval = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [busy, revalidator]);
   const synced =
     fetcher.data && "synced" in fetcher.data ? fetcher.data.synced : null;
 
@@ -663,9 +675,19 @@ export default function Analytics() {
             </s-banner>
           )}
           {syncStates.map((state) => (
-            <s-text key={state.id} color="subdued">
-              {`${state.id.split(":")[1]}: ${state.status}${state.progress ? ` — ${state.progress}` : ""}${state.error ? ` — ${state.error}` : ""}`}
-            </s-text>
+            <s-stack
+              key={state.id}
+              direction="inline"
+              gap="small-200"
+              alignItems="center"
+            >
+              {state.status === "running" && (
+                <s-spinner accessibilityLabel="Sync running" size="base" />
+              )}
+              <s-text color="subdued">
+                {`${state.id.split(":")[1]}: ${state.status}${state.progress ? ` — ${state.progress}` : ""}${state.error ? ` — ${state.error}` : ""}`}
+              </s-text>
+            </s-stack>
           ))}
         </s-stack>
       </s-section>
