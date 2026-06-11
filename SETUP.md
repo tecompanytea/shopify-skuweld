@@ -24,7 +24,7 @@ npm run env -- show        # copy SHOPIFY_API_KEY / SHOPIFY_API_SECRET
 ## 3. Vercel
 
 1. Push this repo to GitHub, import it at https://vercel.com/new.
-2. Project name `skuweld` (gives `https://skuweld.vercel.app`; if taken, use
+2. Project name `skuweld` (gives `https://skuweld-app.vercel.app`; if taken, use
    whatever Vercel assigns and substitute that domain everywhere below).
 3. The build command comes from `vercel.json` (`npm run setup:deploy && npm run build`
    — runs Prisma migrations on deploy).
@@ -34,14 +34,14 @@ npm run env -- show        # copy SHOPIFY_API_KEY / SHOPIFY_API_SECRET
    |---|---|
    | `SHOPIFY_API_KEY` | from step 1 |
    | `SHOPIFY_API_SECRET` | from step 1 |
-   | `SHOPIFY_APP_URL` | `https://skuweld.vercel.app` |
-   | `SHOPIFY_APP_HANDLE` | `skuweld` (the app handle from the Partner dashboard URL) |
+   | `SHOPIFY_APP_URL` | `https://skuweld-app.vercel.app` |
+   | `SHOPIFY_APP_HANDLE` | `skuweld-1` (the app handle from the Partner dashboard URL) |
    | `SCOPES` | `read_inventory,read_locations,read_products` |
    | `DATABASE_URL` | Neon pooled |
    | `DATABASE_URL_UNPOOLED` | Neon direct |
    | `SQUARE_APPLICATION_ID` | from step 4 |
    | `SQUARE_APPLICATION_SECRET` | from step 4 |
-   | `SQUARE_REDIRECT_URL` | `https://skuweld.vercel.app/square/auth/callback` |
+   | `SQUARE_REDIRECT_URL` | `https://skuweld-app.vercel.app/square/auth/callback` |
    | `SQUARE_STATE_SECRET` | `openssl rand -hex 32` |
    | `SQUARE_TOKEN_ENCRYPTION_KEY` | `openssl rand -hex 32` (must be 64 hex chars) |
 
@@ -52,7 +52,7 @@ npm run env -- show        # copy SHOPIFY_API_KEY / SHOPIFY_API_SECRET
 3. Credentials page → copy **Application ID** and **Application Secret**
    (these are the `SQUARE_*` values for step 3).
 4. OAuth page → set **Production Redirect URL** to
-   `https://skuweld.vercel.app/square/auth/callback`.
+   `https://skuweld-app.vercel.app/square/auth/callback`.
 
 ## 5. Deploy + install
 
@@ -62,7 +62,7 @@ npm run deploy             # shopify app deploy — pushes toml (scopes, webhook
 ```
 
 Update `application_url` / `redirect_urls` in `shopify.app.toml` first if your
-Vercel domain isn't `skuweld.vercel.app`.
+Vercel domain isn't `skuweld-app.vercel.app`.
 
 Then install the app on the store: Partner Dashboard → Apps → Skuweld →
 **Select store** → install on `tecompanytea`. Open it in the Shopify admin,

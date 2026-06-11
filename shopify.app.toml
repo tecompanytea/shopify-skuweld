@@ -2,7 +2,7 @@
 # Skuweld app in the Té Company partner org.
 
 client_id = "a58bd05560ba1d46b50f3b5885f5c9e2"
-application_url = "https://skuweld.vercel.app"
+application_url = "https://skuweld-app.vercel.app"
 embedded = true
 name = "Skuweld"
 
@@ -21,7 +21,7 @@ api_version = "2026-07"
 scopes = "read_inventory,read_locations,read_products"
 
 [auth]
-redirect_urls = [ "https://skuweld.vercel.app/auth/callback" ]
+redirect_urls = [ "https://skuweld-app.vercel.app/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true
