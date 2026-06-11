@@ -15,6 +15,7 @@ interface Money {
 interface SquareLineItem {
   uid?: string;
   catalog_object_id?: string;
+  item_type?: string;
   name?: string;
   variation_name?: string;
   quantity?: string;
@@ -254,6 +255,10 @@ export async function syncSquareOrders(
           const info = line.catalog_object_id
             ? catalog.get(line.catalog_object_id)
             : undefined;
+          // Gift card sales are liabilities, not sales — Square's own
+          // category reports exclude them, so they get their own category
+          // that no report row maps to.
+          const isGiftCard = line.item_type === "GIFT_CARD";
           const gross =
             kind === "return"
               ? cents(line.gross_return_money ?? line.gross_sales_money)
@@ -273,7 +278,9 @@ export async function syncSquareOrders(
             sku: info?.sku ?? null,
             itemName: line.name ?? info?.itemName ?? "(unknown item)",
             variationName: line.variation_name ?? null,
-            category: info?.categoryName ?? "Uncategorized",
+            category: isGiftCard
+              ? "Gift Card"
+              : (info?.categoryName ?? "Uncategorized"),
             quantity: sign * parseFloat(line.quantity ?? "1"),
             grossCents: sign * gross,
             discountCents: sign * discount,

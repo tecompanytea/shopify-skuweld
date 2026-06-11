@@ -43,13 +43,19 @@ const GOLDEN = {
   } as Record<string, { ty: number; ly: number }>,
 };
 
-// Known post-export drift: 4 Shopify products were re-typed from
-// "Accessories" to "Teaware" after the manual export was made (verified via
-// ShopifyQL 2026-06-11): TY Accessories -14600, Teaware +14600; LY
-// Accessories -17850, Teaware +17850. Totals are unaffected.
+// Known post-export drift — places where today's catalogs disagree with the
+// catalogs as they stood when the manual export was made. Totals unaffected.
+// 1. 4 Shopify products re-typed "Accessories" → "Teaware" (verified via
+//    ShopifyQL 2026-06-11).
+// 2. Square iced-tea "(TO STAY)" items were created 2026-05-22 under the
+//    Service To Go category and corrected to Service To Stay on 2026-06-08
+//    (item 42TGOJRG5OAF3PSRY6K56MYJ updated_at) — after the export. The
+//    export booked them under To Go; current categories book them To Stay.
 const KNOWN_DRIFT: Record<string, { ty: number; ly: number }> = {
   "Retail Accessories": { ty: -14600, ly: -17850 },
   Teaware: { ty: 14600, ly: 17850 },
+  "Service To Stay": { ty: 16250, ly: 11700 },
+  "Service To Go": { ty: -16250, ly: -11700 },
 };
 
 function dollars(cents: number): string {

@@ -3,6 +3,7 @@ import prisma from "../../db.server";
 import { decryptToken, encryptToken } from "./crypto";
 import {
   SQUARE_BASE_URL,
+  SQUARE_SCOPES,
   refreshAccessToken,
   type SquareTokenResponse,
 } from "./oauth";
@@ -44,7 +45,7 @@ export async function persistTokens(
     accessToken: encryptToken(tokens.access_token),
     refreshToken: encryptToken(tokens.refresh_token),
     expiresAt: new Date(tokens.expires_at),
-    scopes: "ITEMS_READ INVENTORY_READ MERCHANT_PROFILE_READ",
+    scopes: SQUARE_SCOPES.join(" "),
     ...extra,
   };
   return prisma.squareConnection.upsert({
