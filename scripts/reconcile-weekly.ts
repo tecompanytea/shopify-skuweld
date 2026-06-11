@@ -76,8 +76,17 @@ function check(
 }
 
 async function main() {
-  const connection = await prisma.squareConnection.findFirst();
-  if (!connection) throw new Error("No Square connection in DB");
+  // --shop=<domain> targets a specific shop; otherwise prefer the real
+  // store over the dev store when both are connected.
+  const shopArg = process.argv
+    .find((arg) => arg.startsWith("--shop="))
+    ?.slice("--shop=".length);
+  const connections = await prisma.squareConnection.findMany();
+  if (connections.length === 0) throw new Error("No Square connection in DB");
+  const connection = shopArg
+    ? connections.find((c) => c.shop === shopArg)
+    : (connections.find((c) => !/dev/.test(c.shop)) ?? connections[0]);
+  if (!connection) throw new Error(`No Square connection for ${shopArg}`);
   const shop = connection.shop;
   console.log(`Shop: ${shop}\n`);
 

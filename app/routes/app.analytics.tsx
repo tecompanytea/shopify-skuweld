@@ -36,23 +36,41 @@ function requestedRange(request: Request): DayRange {
   return defaultRange();
 }
 
+// Local development can read another shop's already-synced data (the real
+// store's fact table in the shared DB) without being installed there:
+// set ANALYTICS_SHOP_OVERRIDE in .env. Dev-only, and reads only — sync
+// actions are blocked under the override so dev-store orders can never be
+// written into the real shop's rows.
+function analyticsShopOverride(): string | null {
+  return process.env.NODE_ENV === "development"
+    ? (process.env.ANALYTICS_SHOP_OVERRIDE ?? null)
+    : null;
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  const override = analyticsShopOverride();
+  const shop = override ?? session.shop;
   const range = requestedRange(request);
 
   const [syncStates, lineCount] = await Promise.all([
-    prisma.syncState.findMany({ where: { shop: session.shop } }),
-    prisma.salesLine.count({ where: { shop: session.shop } }),
+    prisma.syncState.findMany({ where: { shop } }),
+    prisma.salesLine.count({ where: { shop } }),
   ]);
 
-  const report =
-    lineCount > 0 ? await computeWeeklyReport(session.shop, range) : null;
+  const report = lineCount > 0 ? await computeWeeklyReport(shop, range) : null;
 
-  return { range, syncStates, lineCount, report };
+  return { range, syncStates, lineCount, report, override };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
+  if (analyticsShopOverride()) {
+    return {
+      error:
+        "ANALYTICS_SHOP_OVERRIDE is active (read-only). Run syncs from the real store or the reconcile script.",
+    };
+  }
   const form = await request.formData();
   const intent = form.get("intent");
   const start = String(form.get("start") ?? "");
@@ -208,7 +226,8 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
 }
 
 export default function Analytics() {
-  const { range, syncStates, lineCount, report } = useLoaderData<typeof loader>();
+  const { range, syncStates, lineCount, report, override } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
   const synced =
@@ -223,6 +242,11 @@ export default function Analytics() {
 
   return (
     <s-page heading="Analytics">
+      {override && (
+        <s-banner tone="info">
+          {`Reading data for ${override} (ANALYTICS_SHOP_OVERRIDE) — syncs disabled.`}
+        </s-banner>
+      )}
       <s-section heading="Data sync" accessibilityLabel="Data sync">
         <s-stack direction="block" gap="base">
           <s-paragraph>
