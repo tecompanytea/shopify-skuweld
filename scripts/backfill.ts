@@ -14,7 +14,7 @@ for (const line of readFileSync(".env", "utf8").split("\n")) {
 const { default: prisma } = await import("../app/db.server");
 const { syncSquareOrders } = await import("../app/.server/analytics/square-sync");
 const { syncShopifyOrders } = await import("../app/.server/analytics/shopify-sync");
-const { toReportDay } = await import("../app/.server/analytics/periods");
+const { toReportDay } = await import("../app/lib/periods");
 
 function arg(name: string): string | undefined {
   return process.argv

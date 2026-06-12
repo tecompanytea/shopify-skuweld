@@ -1,6 +1,6 @@
 import prisma from "../../db.server";
 import { squareFetch } from "../square/client";
-import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "./periods";
+import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 
 // Pulls Square orders (sales + itemized returns) into the SalesLine fact
 // table. Channel rules from the manual reports: each store location is its

@@ -1,6 +1,6 @@
 import prisma from "../../db.server";
 import { CATEGORY_ROWS } from "./categories";
-import { weekdayAlignedLastYear, type DayRange } from "./periods";
+import { weekdayAlignedLastYear, type DayRange } from "../../lib/periods";
 
 // Category Top10 weekly report: per channel (stores, web, total), net sales
 // by category TY vs weekday-aligned LY with penetration %, plus the top

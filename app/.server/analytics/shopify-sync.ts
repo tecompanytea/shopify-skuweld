@@ -1,5 +1,5 @@
 import prisma from "../../db.server";
-import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "./periods";
+import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 
 // Pulls Shopify sales into the SalesLine fact table (channel ECOM) from the
 // order's *sales agreements* — the same event ledger Shopify Analytics

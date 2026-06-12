@@ -3,6 +3,10 @@
 // 2. Last-year comparisons are weekday-aligned: LY window = TY window
 //    shifted back exactly 364 days (52 weeks), so Mon..Sun lines up with
 //    Mon..Sun ("previous_year_match_day_of_week" in Shopify's exports).
+//
+// Pure date math only — imported by both server engines and client
+// components (the period picker), so nothing here may touch process.env,
+// Prisma, or other server-only modules.
 
 const REPORT_TIME_ZONE = "America/New_York";
 
@@ -68,4 +72,74 @@ export function rangeToInstants(range: DayRange): { startAt: Date; endAt: Date }
 
 export function dayInRange(day: string, range: DayRange): boolean {
   return day >= range.start && day <= range.end;
+}
+
+// ---- Period presets (the date-picker sidebar quick picks) ----
+
+export interface PeriodPresetDef {
+  value: string;
+  label: string;
+}
+
+// Grouped as rendered in the picker sidebar (a divider between groups).
+export const PERIOD_PRESET_GROUPS: PeriodPresetDef[][] = [
+  [
+    { value: "today", label: "Today" },
+    { value: "yesterday", label: "Yesterday" },
+  ],
+  [{ value: "last-week", label: "Last Week" }],
+  [
+    { value: "wtd", label: "Week to date" },
+    { value: "mtd", label: "Month to date" },
+    { value: "qtd", label: "Quarter to date" },
+    { value: "ytd", label: "Year to date" },
+  ],
+];
+
+export function presetLabel(preset: string): string | null {
+  for (const group of PERIOD_PRESET_GROUPS) {
+    for (const def of group) {
+      if (def.value === preset) return def.label;
+    }
+  }
+  return null;
+}
+
+// Monday of the week containing `day` (report weeks are Mon–Sun).
+export function mondayOf(day: string): string {
+  const dayOfWeek = new Date(`${day}T12:00:00Z`).getUTCDay(); // 0=Sun
+  return shiftDay(day, -((dayOfWeek + 6) % 7));
+}
+
+// Range for a quick-pick preset relative to `today` (report-local).
+// Returns null for "custom" or unknown presets.
+export function rangeForPreset(preset: string, today: string): DayRange | null {
+  switch (preset) {
+    case "today":
+      return { start: today, end: today };
+    case "yesterday": {
+      const yesterday = shiftDay(today, -1);
+      return { start: yesterday, end: yesterday };
+    }
+    case "last-week": {
+      const thisMonday = mondayOf(today);
+      return { start: shiftDay(thisMonday, -7), end: shiftDay(thisMonday, -1) };
+    }
+    case "wtd":
+      return { start: mondayOf(today), end: today };
+    case "mtd":
+      return { start: `${today.slice(0, 7)}-01`, end: today };
+    case "qtd": {
+      const month = Number(today.slice(5, 7));
+      const quarterStartMonth = month - ((month - 1) % 3);
+      return {
+        start: `${today.slice(0, 4)}-${String(quarterStartMonth).padStart(2, "0")}-01`,
+        end: today,
+      };
+    }
+    case "ytd":
+      return { start: `${today.slice(0, 4)}-01-01`, end: today };
+    default:
+      return null;
+  }
 }

@@ -1,6 +1,6 @@
 import prisma from "../../db.server";
 import { CATEGORY_ROWS, type CategoryRow } from "./categories";
-import { weekdayAlignedLastYear, type DayRange } from "./periods";
+import { weekdayAlignedLastYear, type DayRange } from "../../lib/periods";
 
 // Computes the Weekly Meeting Report: net sales by channel and by category,
 // this-year vs weekday-aligned last-year. Reproduces the manual template:

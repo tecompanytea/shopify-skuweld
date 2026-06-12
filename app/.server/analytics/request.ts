@@ -1,4 +1,4 @@
-import { toReportDay, shiftDay, type DayRange } from "./periods";
+import { toReportDay, rangeForPreset, type DayRange } from "../../lib/periods";
 
 // Shared request-level helpers for the analytics routes.
 
@@ -17,49 +17,13 @@ export function resolveAnalyticsShop(sessionShop: string): string {
 
 // Last full Mon-Sun week before today (report timezone).
 export function defaultRange(): DayRange {
-  const today = toReportDay(new Date());
-  const dayOfWeek = new Date(`${today}T12:00:00Z`).getUTCDay(); // 0=Sun
-  const daysSinceMonday = (dayOfWeek + 6) % 7;
-  const thisMonday = shiftDay(today, -daysSinceMonday);
-  return { start: shiftDay(thisMonday, -7), end: shiftDay(thisMonday, -1) };
+  return rangeForPreset("last-week", toReportDay(new Date()))!;
 }
 
-// Resolve a range from ?preset= or explicit ?start=&end= (custom).
+// Resolve a range from ?preset= (quick pick) or ?start=&end= (custom).
 export function resolveRange(params: URLSearchParams): DayRange {
-  const today = toReportDay(new Date());
   const preset = params.get("preset");
-  if (preset === "last-week" || !preset) {
-    const start = params.get("start");
-    const end = params.get("end");
-    if (
-      !preset &&
-      start &&
-      end &&
-      /^\d{4}-\d{2}-\d{2}$/.test(start) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(end)
-    ) {
-      return { start, end };
-    }
-    return defaultRange();
-  }
-  if (preset === "mtd") {
-    return { start: `${today.slice(0, 7)}-01`, end: today };
-  }
-  if (preset === "qtd") {
-    const month = Number(today.slice(5, 7));
-    const quarterStartMonth = month - ((month - 1) % 3);
-    return {
-      start: `${today.slice(0, 4)}-${String(quarterStartMonth).padStart(2, "0")}-01`,
-      end: today,
-    };
-  }
-  if (preset === "ytd") {
-    return { start: `${today.slice(0, 4)}-01-01`, end: today };
-  }
-  if (preset === "rolling-12m") {
-    return { start: shiftDay(today, -364), end: today };
-  }
-  if (preset === "custom") {
+  if (preset === "custom" || !preset) {
     const start = params.get("start");
     const end = params.get("end");
     if (
@@ -71,6 +35,7 @@ export function resolveRange(params: URLSearchParams): DayRange {
     ) {
       return { start, end };
     }
+    return defaultRange();
   }
-  return defaultRange();
+  return rangeForPreset(preset, toReportDay(new Date())) ?? defaultRange();
 }

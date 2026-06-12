@@ -39,18 +39,9 @@ import {
   computeUnitsBySizeReport,
   type UnitsBySizeReport,
 } from "../.server/analytics/units-by-size-report";
-import { SIZE_COLUMNS } from "../lib/analytics-scopes";
-import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
-import type { DayRange } from "../.server/analytics/periods";
-
-const PRESETS = [
-  { value: "last-week", label: "Last full week (Mon–Sun)" },
-  { value: "mtd", label: "Month to date" },
-  { value: "qtd", label: "Quarter to date" },
-  { value: "ytd", label: "Year to date" },
-  { value: "rolling-12m", label: "Rolling 12 months" },
-  { value: "custom", label: "Custom range" },
-] as const;
+import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
+import type { DayRange } from "../lib/periods";
+import { PeriodPicker } from "../components/period-picker";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -446,19 +437,13 @@ export default function Analytics() {
     fetcher.data && "synced" in fetcher.data ? fetcher.data.synced : null;
 
   const [pickedType, setPickedType] = useState(type);
-  const [pickedPreset, setPickedPreset] = useState(preset);
-  const [customStart, setCustomStart] = useState(range.start);
-  const [customEnd, setCustomEnd] = useState(range.end);
   const [exporting, setExporting] = useState(false);
 
   const currentParams = () => {
-    const params: Record<string, string> = {
-      type: pickedType,
-      preset: pickedPreset,
-    };
-    if (pickedPreset === "custom") {
-      params.start = customStart;
-      params.end = customEnd;
+    const params: Record<string, string> = { type: pickedType, preset };
+    if (preset === "custom") {
+      params.start = range.start;
+      params.end = range.end;
     }
     return params;
   };
@@ -525,19 +510,21 @@ export default function Analytics() {
                 Loose Leaf — Units by size
               </s-option>
             </s-select>
-            <s-select
-              label="Period"
-              value={pickedPreset}
-              onChange={(event) =>
-                setPickedPreset((event.target as HTMLSelectElement).value)
-              }
-            >
-              {PRESETS.map((p) => (
-                <s-option key={p.value} value={p.value}>
-                  {p.label}
-                </s-option>
-              ))}
-            </s-select>
+            <PeriodPicker
+              preset={preset}
+              range={range}
+              onApply={(nextPreset, nextRange) => {
+                const params: Record<string, string> = {
+                  type: pickedType,
+                  preset: nextPreset,
+                };
+                if (nextPreset === "custom") {
+                  params.start = nextRange.start;
+                  params.end = nextRange.end;
+                }
+                setSearchParams(params);
+              }}
+            />
             <s-button
               variant="primary"
               onClick={() => setSearchParams(currentParams())}
@@ -559,25 +546,6 @@ export default function Analytics() {
               Export all reports
             </s-button>
           </s-stack>
-          {pickedPreset === "custom" && (
-            <s-box maxInlineSize="360px">
-              <s-date-picker
-                type="range"
-                value={`${customStart}--${customEnd}`}
-                onChange={(event) => {
-                  const picked = (event.currentTarget as { value?: string })
-                    .value;
-                  const match = picked?.match(
-                    /^(\d{4}-\d{2}-\d{2})--(\d{4}-\d{2}-\d{2})$/,
-                  );
-                  if (match) {
-                    setCustomStart(match[1]);
-                    setCustomEnd(match[2]);
-                  }
-                }}
-              />
-            </s-box>
-          )}
           <s-text color="subdued">
             {`Showing ${range.start} → ${range.end}${
               lyRange

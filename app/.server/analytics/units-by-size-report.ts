@@ -1,6 +1,6 @@
 import prisma from "../../db.server";
 import { SIZE_COLUMNS, type SizeColumn } from "../../lib/analytics-scopes";
-import type { DayRange } from "./periods";
+import type { DayRange } from "../../lib/periods";
 
 export { SIZE_COLUMNS, type SizeColumn };
 
