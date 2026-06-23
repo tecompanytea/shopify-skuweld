@@ -40,8 +40,21 @@ import {
   type UnitsBySizeReport,
 } from "../.server/analytics/units-by-size-report";
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
-import type { DayRange } from "../lib/periods";
+import { rangeToInstants, toReportDay, type DayRange } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
+
+// Human "last refreshed" label for the freshness line under the report.
+function refreshedLabel(at: Date, now: number): string {
+  const min = Math.floor((now - at.getTime()) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} h ago`;
+  const days = Math.floor(hr / 24);
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  return `on ${toReportDay(at)}`;
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -52,10 +65,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const preset = url.searchParams.get("preset") ?? "last-week";
   const range = resolveRange(url.searchParams);
 
-  const [syncStates, lineCount] = await Promise.all([
+  const [syncStates, lineCount, refreshAgg] = await Promise.all([
     prisma.syncState.findMany({ where: { shop } }),
     prisma.salesLine.count({ where: { shop } }),
+    prisma.salesLine.aggregate({
+      _max: { syncedAt: true },
+      where: { shop, day: { gte: range.start, lte: range.end } },
+    }),
   ]);
+
+  // Freshness of the *viewed range*: when were its sales lines last pulled?
+  // A range is fresh only once it's been refreshed after the period it covers
+  // closed; a still-open range (ends today) goes stale an hour after the last
+  // pull as new orders arrive; a range with no rows is stale by definition —
+  // that's the "TY shows 0 until you hit refresh" case.
+  const lastRefreshedAt = refreshAgg._max.syncedAt;
+  const today = toReportDay(new Date());
+  const now = Date.now();
+  let stale: boolean;
+  if (!lastRefreshedAt) {
+    stale = true;
+  } else if (range.end >= today) {
+    stale = now - lastRefreshedAt.getTime() > 60 * 60 * 1000;
+  } else {
+    stale = lastRefreshedAt.getTime() < rangeToInstants(range).endAt.getTime();
+  }
+  const lastRefreshedLabel = lastRefreshedAt
+    ? refreshedLabel(lastRefreshedAt, now)
+    : null;
 
   let weekly: WeeklyReport | null = null;
   let productSelling: ProductSellingReport | null = null;
@@ -83,6 +120,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     range,
     syncStates,
     lineCount,
+    stale,
+    lastRefreshedLabel,
     override,
     weekly,
     productSelling,
@@ -100,7 +139,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
   const form = await request.formData();
-  const intent = form.get("intent");
+  if (form.get("intent") !== "refresh") {
+    return { error: "Unknown action" };
+  }
   const start = String(form.get("start") ?? "");
   const end = String(form.get("end") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
@@ -108,19 +149,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   const range: DayRange = { start, end };
 
+  // One Refresh pulls both sources for the viewed range. They run
+  // independently so a Square failure still lets Shopify through (and
+  // vice-versa); a partial failure surfaces the source that broke.
+  const synced: Array<{ source: string; orders: number; lines: number }> = [];
+  const errors: string[] = [];
   try {
-    if (intent === "sync-square") {
-      const result = await syncSquareOrders(session.shop, range);
-      return { synced: { source: "Square", ...result } };
-    }
-    if (intent === "sync-shopify") {
-      const result = await syncShopifyOrders(session.shop, admin, range);
-      return { synced: { source: "Shopify", ...result } };
-    }
+    synced.push({ source: "Square", ...(await syncSquareOrders(session.shop, range)) });
   } catch (error) {
-    return { error: String(error) };
+    errors.push(`Square — ${String(error)}`);
   }
-  return { error: "Unknown action" };
+  try {
+    synced.push({ source: "Shopify", ...(await syncShopifyOrders(session.shop, admin, range)) });
+  } catch (error) {
+    errors.push(`Shopify — ${String(error)}`);
+  }
+  return errors.length ? { synced, error: errors.join(" · ") } : { synced };
 };
 
 export const headers: HeadersFunction = (headersArgs) =>
@@ -413,6 +457,8 @@ export default function Analytics() {
     range,
     syncStates,
     lineCount,
+    stale,
+    lastRefreshedLabel,
     override,
     weekly,
     productSelling,
@@ -435,6 +481,13 @@ export default function Analytics() {
   }, [busy, revalidator]);
   const synced =
     fetcher.data && "synced" in fetcher.data ? fetcher.data.synced : null;
+  const error =
+    fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
+  // Live progress streamed into SyncState by the running pulls.
+  const progressText = syncStates
+    .filter((state) => state.status === "running" && state.progress)
+    .map((state) => `${state.id.split(":")[1]}: ${state.progress}`)
+    .join(" · ");
 
   const [pickedType, setPickedType] = useState(type);
   const [exporting, setExporting] = useState(false);
@@ -480,6 +533,23 @@ export default function Analytics() {
               ? `Product selling — ${productSelling.scope.label}`
               : "Report");
   const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? top10?.lyRange ?? null;
+
+  const freshnessText =
+    lastRefreshedLabel === null
+      ? override
+        ? "No data for this range."
+        : "No data for this range yet — click Refresh to pull it."
+      : stale
+        ? override
+          ? `Last refreshed ${lastRefreshedLabel}.`
+          : `Data may be out of date — last refreshed ${lastRefreshedLabel}. Click Refresh.`
+        : `Up to date — last refreshed ${lastRefreshedLabel}.`;
+
+  const refresh = () =>
+    fetcher.submit(
+      { intent: "refresh", start: range.start, end: range.end },
+      { method: "post" },
+    );
 
   return (
     <s-page heading="Analytics">
@@ -545,6 +615,15 @@ export default function Analytics() {
             >
               Export all reports
             </s-button>
+            <s-button
+              icon="refresh"
+              variant={stale ? "primary" : "secondary"}
+              disabled={Boolean(override) || busy || !stale}
+              loading={busy}
+              onClick={refresh}
+            >
+              Refresh
+            </s-button>
           </s-stack>
           <s-text color="subdued">
             {`Showing ${range.start} → ${range.end}${
@@ -555,110 +634,71 @@ export default function Analytics() {
                 : ""
             }`}
           </s-text>
-        </s-stack>
-      </s-section>
-
-      <s-section
-        heading={reportTitle}
-        accessibilityLabel="Report"
-        padding="none"
-      >
-        {weekly ? (
-          <s-stack direction="block" gap="base">
-            <ChannelBlock report={weekly} />
-            <CategoryBlock report={weekly} />
-          </s-stack>
-        ) : productSelling ? (
-          <ProductSellingBlock report={productSelling} />
-        ) : top10 ? (
-          <Top10Block report={top10} />
-        ) : unitsBySize ? (
-          <UnitsBySizeBlock report={unitsBySize} />
-        ) : (
-          <s-box padding="base">
-            <s-paragraph>
-              No data yet — run the syncs below, then reload.
-            </s-paragraph>
-          </s-box>
-        )}
-      </s-section>
-
-      <s-section heading="Data sync" accessibilityLabel="Data sync">
-        <s-stack direction="block" gap="base">
-          <s-paragraph>
-            {`${lineCount.toLocaleString("en-US")} sales lines in the local fact table.`}
-          </s-paragraph>
-          <s-stack direction="inline" gap="small" alignItems="end">
-            <s-text-field
-              id="sync-start"
-              label="From"
-              defaultValue={range.start}
-              placeholder="YYYY-MM-DD"
-            />
-            <s-text-field
-              id="sync-end"
-              label="To"
-              defaultValue={range.end}
-              placeholder="YYYY-MM-DD"
-            />
-            <s-button
-              disabled={busy}
-              loading={busy}
-              onClick={() =>
-                fetcher.submit(
-                  {
-                    intent: "sync-square",
-                    start: (document.getElementById("sync-start") as HTMLInputElement)?.value,
-                    end: (document.getElementById("sync-end") as HTMLInputElement)?.value,
-                  },
-                  { method: "post" },
-                )
-              }
-            >
-              Sync Square
-            </s-button>
-            <s-button
-              disabled={busy}
-              loading={busy}
-              onClick={() =>
-                fetcher.submit(
-                  {
-                    intent: "sync-shopify",
-                    start: (document.getElementById("sync-start") as HTMLInputElement)?.value,
-                    end: (document.getElementById("sync-end") as HTMLInputElement)?.value,
-                  },
-                  { method: "post" },
-                )
-              }
-            >
-              Sync Shopify
-            </s-button>
-          </s-stack>
-          {fetcher.data && "error" in fetcher.data && (
-            <s-banner tone="critical">{fetcher.data.error}</s-banner>
+          {stale ? (
+            <s-text tone="critical">{freshnessText}</s-text>
+          ) : (
+            <s-text color="subdued">{freshnessText}</s-text>
           )}
-          {synced && (
+          {busy && (
+            <s-stack direction="inline" gap="small-200" alignItems="center">
+              <s-spinner accessibilityLabel="Refreshing" size="base" />
+              <s-text color="subdued">{progressText || "Refreshing…"}</s-text>
+            </s-stack>
+          )}
+          {error && <s-banner tone="critical">{error}</s-banner>}
+          {synced && synced.length > 0 && (
             <s-banner tone="success">
-              {`${synced.source}: ${synced.orders.toLocaleString("en-US")} orders → ${synced.lines.toLocaleString("en-US")} lines.`}
+              {synced
+                .map(
+                  (result) =>
+                    `${result.source}: ${result.orders.toLocaleString("en-US")} orders → ${result.lines.toLocaleString("en-US")} lines`,
+                )
+                .join(" · ")}
             </s-banner>
           )}
-          {syncStates.map((state) => (
-            <s-stack
-              key={state.id}
-              direction="inline"
-              gap="small-200"
-              alignItems="center"
-            >
-              {state.status === "running" && (
-                <s-spinner accessibilityLabel="Sync running" size="base" />
-              )}
-              <s-text color="subdued">
-                {`${state.id.split(":")[1]}: ${state.status}${state.progress ? ` — ${state.progress}` : ""}${state.error ? ` — ${state.error}` : ""}`}
-              </s-text>
-            </s-stack>
-          ))}
         </s-stack>
       </s-section>
+
+      {weekly ? (
+        // Two tables with different column counts (channel vs category), so
+        // give each its own card instead of stacking them in one section.
+        <>
+          <s-section
+            heading="Sales by channel"
+            accessibilityLabel="Sales by channel"
+            padding="none"
+          >
+            <ChannelBlock report={weekly} />
+          </s-section>
+          <s-section
+            heading="Sales by category"
+            accessibilityLabel="Sales by category"
+            padding="none"
+          >
+            <CategoryBlock report={weekly} />
+          </s-section>
+        </>
+      ) : (
+        <s-section
+          heading={reportTitle}
+          accessibilityLabel="Report"
+          padding="none"
+        >
+          {productSelling ? (
+            <ProductSellingBlock report={productSelling} />
+          ) : top10 ? (
+            <Top10Block report={top10} />
+          ) : unitsBySize ? (
+            <UnitsBySizeBlock report={unitsBySize} />
+          ) : (
+            <s-box padding="base">
+              <s-paragraph>
+                No data for this range yet — click Refresh above to pull it.
+              </s-paragraph>
+            </s-box>
+          )}
+        </s-section>
+      )}
     </s-page>
   );
 }
