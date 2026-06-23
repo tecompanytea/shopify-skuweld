@@ -1,4 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run setup:deploy && npm run build"
+  "buildCommand": "prisma generate && npm run build"
 }
