@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import type { WeeklyReport, CellPair } from "./weekly-report";
+import type { WeeklyReport, CellPair, ChannelCells } from "./weekly-report";
 import type { ProductSellingReport, ProductCell } from "./product-selling-report";
 import { SIZE_COLUMNS, type UnitsBySizeReport } from "./units-by-size-report";
 import type { Top10Report } from "./top10-report";
@@ -9,6 +9,7 @@ import type { Top10Report } from "./top10-report";
 
 const MONEY = "#,##0.00";
 const PCT = "0.0%";
+const PCT0 = "0%"; // Distribution mix is whole-percent, like the manual sheet
 
 function pct(ty: number, ly: number): number | string {
   if (ly === 0) return ty === 0 ? "—" : "New";
@@ -133,12 +134,49 @@ function writeWeeklySheet(
     writeCategoryRow(c.row.key, c.total, c.wv, c.ev, c.ecom);
   }
   sheet.addRow([]);
-  writeCategoryRow("Total Retail", report.sections.retail, undefined, undefined, undefined, true);
-  writeCategoryRow("Total Service", report.sections.service, undefined, undefined, undefined, true);
-  writeCategoryRow("Others", report.sections.others, undefined, undefined, undefined, true);
+  writeCategoryRow("Total Retail", report.sections.retail.total, undefined, undefined, undefined, true);
+  writeCategoryRow("Total Service", report.sections.service.total, undefined, undefined, undefined, true);
+  writeCategoryRow("Others", report.sections.others.total, undefined, undefined, undefined, true);
   for (const g of report.groups) {
     writeCategoryRow(`TTL ${g.group}`, g.total, undefined, undefined, undefined, true);
   }
+
+  // Distribution: the same category / section / group roll-ups expressed as
+  // each row's share of its column. Columns are TOTAL (WV+EV+Web), STRS
+  // (WV+EV), WV, EV, WEB — TY only, like the manual template.
+  sheet.addRow([]);
+  const distHeader = sheet.addRow(["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"]);
+  distHeader.font = { bold: true };
+  const distDenom = {
+    total: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
+    strs: channels.wv.ty + channels.ev.ty,
+    wv: channels.wv.ty,
+    ev: channels.ev.ty,
+    web: channels.ecom.ty,
+  };
+  const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
+  const writeDistRow = (label: string, c: ChannelCells, bold = false) => {
+    const row = sheet.addRow([label]);
+    if (bold) row.font = { bold: true };
+    const cells: Array<[number, number]> = [
+      [c.total.ty, distDenom.total],
+      [c.wv.ty + c.ev.ty, distDenom.strs],
+      [c.wv.ty, distDenom.wv],
+      [c.ev.ty, distDenom.ev],
+      [c.ecom.ty, distDenom.web],
+    ];
+    cells.forEach(([value, denom], i) => {
+      const cell = row.getCell(2 + i);
+      cell.value = share(value, denom);
+      cell.numFmt = PCT0;
+    });
+  };
+  for (const c of report.categories) writeDistRow(c.row.key, c);
+  sheet.addRow([]);
+  writeDistRow("Total Retail", report.sections.retail, true);
+  writeDistRow("Total Service", report.sections.service, true);
+  writeDistRow("Others", report.sections.others, true);
+  for (const g of report.groups) writeDistRow(`TTL ${g.group}`, g, true);
 }
 
 export async function buildWeeklyWorkbook(

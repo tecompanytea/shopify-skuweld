@@ -25,6 +25,7 @@ import {
 import {
   computeWeeklyReport,
   type CellPair,
+  type ChannelCells,
   type WeeklyReport,
 } from "../.server/analytics/weekly-report";
 import {
@@ -275,9 +276,9 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
         ))}
         {(
           [
-            ["Total Retail", report.sections.retail],
-            ["Total Service", report.sections.service],
-            ["Others", report.sections.others],
+            ["Total Retail", report.sections.retail.total],
+            ["Total Service", report.sections.service.total],
+            ["Others", report.sections.others.total],
             ...report.groups.map(
               (g) => [`TTL ${g.group}`, g.total] as [string, CellPair],
             ),
@@ -289,6 +290,65 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
             <s-table-cell />
             <s-table-cell />
             <s-table-cell />
+          </s-table-row>
+        ))}
+      </s-table-body>
+    </s-table>
+  );
+}
+
+// Mix view of the weekly report: each row's share of its column's TY net.
+// Columns are TOTAL (WV+EV+Web), STRS (WV+EV), WV, EV, WEB — invoiced is
+// uncategorized so it never appears here. Whole-percent to match the manual
+// template; the category, section, and group blocks each sum to ~100% down a
+// column.
+function distPct(value: number, denom: number): string {
+  if (denom === 0) return "0%";
+  return `${Math.round((value / denom) * 100)}%`;
+}
+
+function DistributionBlock({ report }: { report: WeeklyReport }) {
+  const { channels } = report;
+  const denom = {
+    total: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
+    strs: channels.wv.ty + channels.ev.ty,
+    wv: channels.wv.ty,
+    ev: channels.ev.ty,
+    web: channels.ecom.ty,
+  };
+  const cells = (c: ChannelCells) => ({
+    total: distPct(c.total.ty, denom.total),
+    strs: distPct(c.wv.ty + c.ev.ty, denom.strs),
+    wv: distPct(c.wv.ty, denom.wv),
+    ev: distPct(c.ev.ty, denom.ev),
+    web: distPct(c.ecom.ty, denom.web),
+  });
+  const rows: Array<{ label: string; cells: ReturnType<typeof cells> }> = [
+    ...report.categories.map((c) => ({ label: c.row.key, cells: cells(c) })),
+    { label: "Total Retail", cells: cells(report.sections.retail) },
+    { label: "Total Service", cells: cells(report.sections.service) },
+    { label: "Others", cells: cells(report.sections.others) },
+    ...report.groups.map((g) => ({ label: `TTL ${g.group}`, cells: cells(g) })),
+  ];
+  return (
+    <s-table>
+      <s-table-header-row>
+        <s-table-header listSlot="primary">Category</s-table-header>
+        <s-table-header listSlot="labeled">TOTAL</s-table-header>
+        <s-table-header listSlot="labeled">STRS</s-table-header>
+        <s-table-header listSlot="labeled">WV</s-table-header>
+        <s-table-header listSlot="labeled">EV</s-table-header>
+        <s-table-header listSlot="labeled">WEB</s-table-header>
+      </s-table-header-row>
+      <s-table-body>
+        {rows.map((r) => (
+          <s-table-row key={r.label}>
+            <s-table-cell>{r.label}</s-table-cell>
+            <s-table-cell>{r.cells.total}</s-table-cell>
+            <s-table-cell>{r.cells.strs}</s-table-cell>
+            <s-table-cell>{r.cells.wv}</s-table-cell>
+            <s-table-cell>{r.cells.ev}</s-table-cell>
+            <s-table-cell>{r.cells.web}</s-table-cell>
           </s-table-row>
         ))}
       </s-table-body>
@@ -676,6 +736,13 @@ export default function Analytics() {
             padding="none"
           >
             <CategoryBlock report={weekly} />
+          </s-section>
+          <s-section
+            heading="Distribution"
+            accessibilityLabel="Distribution"
+            padding="none"
+          >
+            <DistributionBlock report={weekly} />
           </s-section>
         </>
       ) : (

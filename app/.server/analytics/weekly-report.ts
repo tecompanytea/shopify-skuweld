@@ -12,12 +12,19 @@ export interface CellPair {
   ly: number; // cents
 }
 
-export interface CategoryReportRow {
-  row: CategoryRow;
+// A roll-up's net split across the store channels. `total` is wv+ev+ecom;
+// invoiced is never categorized, so it stays out of these splits — which is
+// exactly the Distribution table's columns: TOTAL / STRS(=WV+EV) / WV / EV /
+// WEB.
+export interface ChannelCells {
   total: CellPair;
   wv: CellPair;
   ev: CellPair;
   ecom: CellPair;
+}
+
+export interface CategoryReportRow extends ChannelCells {
+  row: CategoryRow;
 }
 
 export interface WeeklyReport {
@@ -31,11 +38,11 @@ export interface WeeklyReport {
   };
   categories: CategoryReportRow[];
   sections: {
-    retail: CellPair;
-    service: CellPair;
-    others: CellPair;
+    retail: ChannelCells;
+    service: ChannelCells;
+    others: ChannelCells;
   };
-  groups: Array<{ group: string; total: CellPair }>;
+  groups: Array<{ group: string } & ChannelCells>;
 }
 
 interface Sums {
@@ -75,6 +82,26 @@ function categoryNet(
   return sums.byChannelCategory.get(channel)?.get(category) ?? 0;
 }
 
+const ZERO_PAIR: CellPair = { ty: 0, ly: 0 };
+const addPair = (a: CellPair, b: CellPair): CellPair => ({
+  ty: a.ty + b.ty,
+  ly: a.ly + b.ly,
+});
+
+// Adds up the per-channel cells of several roll-up rows — the categories
+// inside a section or group, or every category for the grand total.
+function sumChannelCells(rows: ChannelCells[]): ChannelCells {
+  return rows.reduce<ChannelCells>(
+    (acc, c) => ({
+      total: addPair(acc.total, c.total),
+      wv: addPair(acc.wv, c.wv),
+      ev: addPair(acc.ev, c.ev),
+      ecom: addPair(acc.ecom, c.ecom),
+    }),
+    { total: ZERO_PAIR, wv: ZERO_PAIR, ev: ZERO_PAIR, ecom: ZERO_PAIR },
+  );
+}
+
 export async function computeWeeklyReport(
   shop: string,
   range: DayRange,
@@ -107,42 +134,28 @@ export async function computeWeeklyReport(
     };
   });
 
-  const sectionSum = (section: CategoryRow["section"]): CellPair =>
-    categories
-      .filter((c) => c.row.section === section)
-      .reduce(
-        (acc, c) => ({ ty: acc.ty + c.total.ty, ly: acc.ly + c.total.ly }),
-        { ty: 0, ly: 0 },
-      );
+  // Store channels are the sum of their category rows (the template's =SUM
+  // over the category table), so the channel and category blocks always
+  // agree. The same per-channel roll-up feeds the Distribution table, where
+  // sections and groups need their WV/EV/Web split, not just the total.
+  const sectionCells = (section: CategoryRow["section"]): ChannelCells =>
+    sumChannelCells(categories.filter((c) => c.row.section === section));
 
   const groupNames = [...new Set(CATEGORY_ROWS.map((r) => r.group))];
   const groups = groupNames.map((group) => ({
     group,
-    total: categories
-      .filter((c) => c.row.group === group)
-      .reduce(
-        (acc, c) => ({ ty: acc.ty + c.total.ty, ly: acc.ly + c.total.ly }),
-        { ty: 0, ly: 0 },
-      ),
+    ...sumChannelCells(categories.filter((c) => c.row.group === group)),
   }));
 
-  // Channel block: store channels are the sum of their category rows (the
-  // template's =SUM over the category table), so both blocks always agree.
-  const channelSum = (
-    pick: (c: CategoryReportRow) => CellPair,
-  ): CellPair =>
-    categories.reduce(
-      (acc, c) => ({ ty: acc.ty + pick(c).ty, ly: acc.ly + pick(c).ly }),
-      { ty: 0, ly: 0 },
-    );
+  const grand = sumChannelCells(categories);
 
   return {
     range,
     lyRange,
     channels: {
-      wv: channelSum((c) => c.wv),
-      ev: channelSum((c) => c.ev),
-      ecom: channelSum((c) => c.ecom),
+      wv: grand.wv,
+      ev: grand.ev,
+      ecom: grand.ecom,
       invoiced: {
         ty: ty.byChannel.get("INVOICED") ?? 0,
         ly: ly.byChannel.get("INVOICED") ?? 0,
@@ -150,9 +163,9 @@ export async function computeWeeklyReport(
     },
     categories,
     sections: {
-      retail: sectionSum("retail"),
-      service: sectionSum("service"),
-      others: sectionSum("others"),
+      retail: sectionCells("retail"),
+      service: sectionCells("service"),
+      others: sectionCells("others"),
     },
     groups,
   };
