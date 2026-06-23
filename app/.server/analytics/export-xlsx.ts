@@ -178,11 +178,14 @@ function writeWeeklySheet(
     distCells(row, label, c);
   };
 
-  // A By Category grand-total line; the Distribution side is left blank.
-  const totalRow = () => {
+  // A grand-total line. By Category always shows the dollar total. The
+  // Distribution side only foots the section and group blocks — each column
+  // sums to 100% there — not the raw category list.
+  const totalRow = (withDist = false) => {
     const row = sheet.addRow([]);
     row.font = { bold: true };
     catCells(row, "TOTAL", grand);
+    if (withDist) distCells(row, "TOTAL", grand);
   };
 
   for (const c of report.categories) dataRow(c.row.key, c);
@@ -191,10 +194,10 @@ function writeWeeklySheet(
   dataRow("Total Retail", report.sections.retail, true);
   dataRow("Total Service", report.sections.service, true);
   dataRow("Others", report.sections.others, true);
-  totalRow();
+  totalRow(true);
   sheet.addRow([]);
   for (const g of report.groups) dataRow(`TTL ${g.group}`, g, true);
-  totalRow();
+  totalRow(true);
 }
 
 export async function buildWeeklyWorkbook(

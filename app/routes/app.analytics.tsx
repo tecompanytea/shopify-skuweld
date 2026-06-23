@@ -333,8 +333,8 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
     ev: channels.ev.ty,
     web: channels.ecom.ty,
   };
-  const row = (label: string, c: ChannelCells) => (
-    <s-table-row key={label}>
+  const row = (label: string, c: ChannelCells, key: string = label) => (
+    <s-table-row key={key}>
       <s-table-cell>{label}</s-table-cell>
       <s-table-cell>{distPct(c.total.ty, denom.total)}</s-table-cell>
       <s-table-cell>{distPct(c.wv.ty + c.ev.ty, denom.strs)}</s-table-cell>
@@ -343,6 +343,17 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
       <s-table-cell>{distPct(c.ecom.ty, denom.web)}</s-table-cell>
     </s-table-row>
   );
+  // The section and group blocks each partition every category, so each foots
+  // to 100% per column — a TOTAL row confirms the mix adds up.
+  const grand: ChannelCells = {
+    total: {
+      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
+      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
+    },
+    wv: channels.wv,
+    ev: channels.ev,
+    ecom: channels.ecom,
+  };
   return (
     <s-table>
       <s-table-header-row>
@@ -359,8 +370,10 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
         {row("Total Retail", report.sections.retail)}
         {row("Total Service", report.sections.service)}
         {row("Others", report.sections.others)}
+        {row("TOTAL", grand, "total-sections")}
         <SpacerRow key="gap-rollups" columns={6} />
         {report.groups.map((g) => row(`TTL ${g.group}`, g))}
+        {row("TOTAL", grand, "total-groups")}
       </s-table-body>
     </s-table>
   );
