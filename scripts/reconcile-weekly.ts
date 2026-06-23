@@ -39,21 +39,20 @@ const GOLDEN = {
     "Service Snacks": { ty: 244850, ly: 176240 },
     "Service To Go": { ty: 98255, ly: 62355 },
     Uncategorized: { ty: 29200, ly: 27200 },
-    Teaware: { ty: 0, ly: 0 },
   } as Record<string, { ty: number; ly: number }>,
 };
 
 // Known post-export drift — places where today's catalogs disagree with the
 // catalogs as they stood when the manual export was made. Totals unaffected.
-// 1. 4 Shopify products re-typed "Accessories" → "Teaware" (verified via
-//    ShopifyQL 2026-06-11).
-// 2. Square iced-tea "(TO STAY)" items were created 2026-05-22 under the
-//    Service To Go category and corrected to Service To Stay on 2026-06-08
-//    (item 42TGOJRG5OAF3PSRY6K56MYJ updated_at) — after the export. The
-//    export booked them under To Go; current categories book them To Stay.
+// The old Accessories↔Teaware drift (4 Shopify products re-typed
+// "Accessories" → "Teaware" after export) no longer needs an adjustment: we
+// fold Shopify "Teaware" into the Retail Accessories row, so it lands in
+// Accessories either way (see categories.ts).
+// Square iced-tea "(TO STAY)" items were created 2026-05-22 under the Service
+// To Go category and corrected to Service To Stay on 2026-06-08 (item
+// 42TGOJRG5OAF3PSRY6K56MYJ updated_at) — after the export. The export booked
+// them under To Go; current categories book them To Stay.
 const KNOWN_DRIFT: Record<string, { ty: number; ly: number }> = {
-  "Retail Accessories": { ty: -14600, ly: -17850 },
-  Teaware: { ty: 14600, ly: 17850 },
   "Service To Stay": { ty: 16250, ly: 11700 },
   "Service To Go": { ty: -16250, ly: -11700 },
 };

@@ -41,8 +41,10 @@ export interface Top10Report {
 // already carry Square category names; Shopify lines carry product types
 // that translate via the weekly report's category bridge.
 const SHOPIFY_TYPE_TO_CATEGORY = new Map(
-  CATEGORY_ROWS.filter((row) => row.shopifyProductType && row.squareCategory).map(
-    (row) => [row.shopifyProductType as string, row.squareCategory as string],
+  CATEGORY_ROWS.filter((row) => row.squareCategory).flatMap((row) =>
+    row.shopifyProductTypes.map(
+      (type) => [type, row.squareCategory as string] as [string, string],
+    ),
   ),
 );
 

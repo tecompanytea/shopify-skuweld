@@ -122,8 +122,14 @@ export async function computeWeeklyReport(
       ly: categoryNet(ly, "EV", row.squareCategory),
     };
     const ecom: CellPair = {
-      ty: categoryNet(ty, "ECOM", row.shopifyProductType),
-      ly: categoryNet(ly, "ECOM", row.shopifyProductType),
+      ty: row.shopifyProductTypes.reduce(
+        (sum, type) => sum + categoryNet(ty, "ECOM", type),
+        0,
+      ),
+      ly: row.shopifyProductTypes.reduce(
+        (sum, type) => sum + categoryNet(ly, "ECOM", type),
+        0,
+      ),
     };
     return {
       row,
