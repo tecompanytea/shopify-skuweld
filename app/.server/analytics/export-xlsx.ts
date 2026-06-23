@@ -39,6 +39,9 @@ function writeWeeklySheet(
   for (const c of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
     sheet.getColumn(c).width = 12;
   }
+  sheet.getColumn(14).width = 3; // gap between By Category and Distribution
+  sheet.getColumn(15).width = 22; // Distribution row labels
+  for (const c of [16, 17, 18, 19, 20]) sheet.getColumn(c).width = 8;
 
   sheet.addRow(["Té Company Weekly Report"]).font = { bold: true, size: 14 };
   sheet.addRow([
@@ -89,6 +92,10 @@ function writeWeeklySheet(
   }
   sheet.addRow([]);
 
+  // By Category (columns A–M) and Distribution (columns O–T) sit side by side
+  // on shared rows. Distribution prints no grand-total rows, so where By
+  // Category prints a TOTAL the Distribution side stays blank — which keeps
+  // the two tables row-aligned and supplies the spacing on that side.
   const catHeader = sheet.addRow([
     "BY CATEGORY",
     "TOTAL TY",
@@ -104,34 +111,10 @@ function writeWeeklySheet(
     "Web LY",
     "Web %",
   ]);
+  ["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"].forEach((h, i) => {
+    catHeader.getCell(15 + i).value = h;
+  });
   catHeader.font = { bold: true };
-  const writeCategoryRow = (
-    label: string,
-    total: CellPair,
-    wv?: CellPair,
-    ev?: CellPair,
-    ecom?: CellPair,
-    bold = false,
-  ) => {
-    const row = sheet.addRow([label]);
-    if (bold) row.font = { bold: true };
-    moneyCell(row, 2, total.ty);
-    moneyCell(row, 3, total.ly);
-    pctCell(row, 4, total.ty, total.ly);
-    if (wv && ev && ecom) {
-      moneyCell(row, 5, wv.ty);
-      moneyCell(row, 6, wv.ly);
-      pctCell(row, 7, wv.ty, wv.ly);
-      moneyCell(row, 8, ev.ty);
-      moneyCell(row, 9, ev.ly);
-      pctCell(row, 10, ev.ty, ev.ly);
-      moneyCell(row, 11, ecom.ty);
-      moneyCell(row, 12, ecom.ly);
-      pctCell(row, 13, ecom.ty, ecom.ly);
-    }
-  };
-  const writeChannelCellsRow = (label: string, c: ChannelCells) =>
-    writeCategoryRow(label, c.total, c.wv, c.ev, c.ecom, true);
   // All three blocks (categories, sections, groups) foot to the same grand
   // total, so each ends with it. Invoiced is uncategorized, so it's excluded.
   const grand: ChannelCells = {
@@ -143,27 +126,6 @@ function writeWeeklySheet(
     ev: channels.ev,
     ecom: channels.ecom,
   };
-  for (const c of report.categories) {
-    writeCategoryRow(c.row.key, c.total, c.wv, c.ev, c.ecom);
-  }
-  writeChannelCellsRow("TOTAL", grand);
-  sheet.addRow([]);
-  writeChannelCellsRow("Total Retail", report.sections.retail);
-  writeChannelCellsRow("Total Service", report.sections.service);
-  writeChannelCellsRow("Others", report.sections.others);
-  writeChannelCellsRow("TOTAL", grand);
-  sheet.addRow([]);
-  for (const g of report.groups) {
-    writeChannelCellsRow(`TTL ${g.group}`, g);
-  }
-  writeChannelCellsRow("TOTAL", grand);
-
-  // Distribution: the same category / section / group roll-ups expressed as
-  // each row's share of its column. Columns are TOTAL (WV+EV+Web), STRS
-  // (WV+EV), WV, EV, WEB — TY only, like the manual template.
-  sheet.addRow([]);
-  const distHeader = sheet.addRow(["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"]);
-  distHeader.font = { bold: true };
   const distDenom = {
     total: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
     strs: channels.wv.ty + channels.ev.ty,
@@ -172,29 +134,67 @@ function writeWeeklySheet(
     web: channels.ecom.ty,
   };
   const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
-  const writeDistRow = (label: string, c: ChannelCells, bold = false) => {
-    const row = sheet.addRow([label]);
-    if (bold) row.font = { bold: true };
-    const cells: Array<[number, number]> = [
+
+  // Writes the By Category money cells (cols 1–13) onto an existing row.
+  const catCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
+    row.getCell(1).value = label;
+    moneyCell(row, 2, c.total.ty);
+    moneyCell(row, 3, c.total.ly);
+    pctCell(row, 4, c.total.ty, c.total.ly);
+    moneyCell(row, 5, c.wv.ty);
+    moneyCell(row, 6, c.wv.ly);
+    pctCell(row, 7, c.wv.ty, c.wv.ly);
+    moneyCell(row, 8, c.ev.ty);
+    moneyCell(row, 9, c.ev.ly);
+    pctCell(row, 10, c.ev.ty, c.ev.ly);
+    moneyCell(row, 11, c.ecom.ty);
+    moneyCell(row, 12, c.ecom.ly);
+    pctCell(row, 13, c.ecom.ty, c.ecom.ly);
+  };
+
+  // Writes the Distribution percentage cells (cols 15–20) onto an existing row.
+  const distCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
+    row.getCell(15).value = label;
+    const vals: Array<[number, number]> = [
       [c.total.ty, distDenom.total],
       [c.wv.ty + c.ev.ty, distDenom.strs],
       [c.wv.ty, distDenom.wv],
       [c.ev.ty, distDenom.ev],
       [c.ecom.ty, distDenom.web],
     ];
-    cells.forEach(([value, denom], i) => {
-      const cell = row.getCell(2 + i);
+    vals.forEach(([value, denom], i) => {
+      const cell = row.getCell(16 + i);
       cell.value = share(value, denom);
       cell.numFmt = PCT0;
     });
   };
-  for (const c of report.categories) writeDistRow(c.row.key, c);
+
+  // One category / section / group line: By Category (left) and Distribution
+  // (right) share the same sheet row.
+  const dataRow = (label: string, c: ChannelCells, bold = false) => {
+    const row = sheet.addRow([]);
+    if (bold) row.font = { bold: true };
+    catCells(row, label, c);
+    distCells(row, label, c);
+  };
+
+  // A By Category grand-total line; the Distribution side is left blank.
+  const totalRow = () => {
+    const row = sheet.addRow([]);
+    row.font = { bold: true };
+    catCells(row, "TOTAL", grand);
+  };
+
+  for (const c of report.categories) dataRow(c.row.key, c);
+  totalRow();
   sheet.addRow([]);
-  writeDistRow("Total Retail", report.sections.retail, true);
-  writeDistRow("Total Service", report.sections.service, true);
-  writeDistRow("Others", report.sections.others, true);
+  dataRow("Total Retail", report.sections.retail, true);
+  dataRow("Total Service", report.sections.service, true);
+  dataRow("Others", report.sections.others, true);
+  totalRow();
   sheet.addRow([]);
-  for (const g of report.groups) writeDistRow(`TTL ${g.group}`, g, true);
+  for (const g of report.groups) dataRow(`TTL ${g.group}`, g, true);
+  totalRow();
 }
 
 export async function buildWeeklyWorkbook(
