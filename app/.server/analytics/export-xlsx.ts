@@ -139,6 +139,7 @@ function writeWeeklySheet(
   writeChannelCellsRow("Total Retail", report.sections.retail);
   writeChannelCellsRow("Total Service", report.sections.service);
   writeChannelCellsRow("Others", report.sections.others);
+  sheet.addRow([]);
   for (const g of report.groups) {
     writeChannelCellsRow(`TTL ${g.group}`, g);
   }
@@ -178,6 +179,7 @@ function writeWeeklySheet(
   writeDistRow("Total Retail", report.sections.retail, true);
   writeDistRow("Total Service", report.sections.service, true);
   writeDistRow("Others", report.sections.others, true);
+  sheet.addRow([]);
   for (const g of report.groups) writeDistRow(`TTL ${g.group}`, g, true);
 }
 

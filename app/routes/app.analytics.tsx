@@ -252,7 +252,29 @@ function ChannelBlock({ report }: { report: WeeklyReport }) {
   );
 }
 
+// A blank row gaps the three blocks (categories / section subtotals / group
+// roll-ups). s-table has no row-group primitive, so an empty row is how we
+// space them while staying one aligned table — like the manual's blank lines.
+function SpacerRow({ columns }: { columns: number }) {
+  return (
+    <s-table-row>
+      {Array.from({ length: columns }, (_, i) => (
+        <s-table-cell key={i} />
+      ))}
+    </s-table-row>
+  );
+}
+
 function CategoryBlock({ report }: { report: WeeklyReport }) {
+  const row = (label: string, cells: ChannelCells) => (
+    <s-table-row key={label}>
+      <s-table-cell>{label}</s-table-cell>
+      <PairCells pair={cells.total} />
+      <s-table-cell>{dollars(cells.wv.ty)}</s-table-cell>
+      <s-table-cell>{dollars(cells.ev.ty)}</s-table-cell>
+      <s-table-cell>{dollars(cells.ecom.ty)}</s-table-cell>
+    </s-table-row>
+  );
   return (
     <s-table>
       <s-table-header-row>
@@ -265,33 +287,13 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
         <s-table-header listSlot="labeled">Web TY</s-table-header>
       </s-table-header-row>
       <s-table-body>
-        {report.categories.map((c) => (
-          <s-table-row key={c.row.key}>
-            <s-table-cell>{c.row.key}</s-table-cell>
-            <PairCells pair={c.total} />
-            <s-table-cell>{dollars(c.wv.ty)}</s-table-cell>
-            <s-table-cell>{dollars(c.ev.ty)}</s-table-cell>
-            <s-table-cell>{dollars(c.ecom.ty)}</s-table-cell>
-          </s-table-row>
-        ))}
-        {(
-          [
-            ["Total Retail", report.sections.retail],
-            ["Total Service", report.sections.service],
-            ["Others", report.sections.others],
-            ...report.groups.map(
-              (g) => [`TTL ${g.group}`, g] as [string, ChannelCells],
-            ),
-          ] as Array<[string, ChannelCells]>
-        ).map(([label, cells]) => (
-          <s-table-row key={label}>
-            <s-table-cell>{label}</s-table-cell>
-            <PairCells pair={cells.total} />
-            <s-table-cell>{dollars(cells.wv.ty)}</s-table-cell>
-            <s-table-cell>{dollars(cells.ev.ty)}</s-table-cell>
-            <s-table-cell>{dollars(cells.ecom.ty)}</s-table-cell>
-          </s-table-row>
-        ))}
+        {report.categories.map((c) => row(c.row.key, c))}
+        <SpacerRow key="gap-subtotals" columns={7} />
+        {row("Total Retail", report.sections.retail)}
+        {row("Total Service", report.sections.service)}
+        {row("Others", report.sections.others)}
+        <SpacerRow key="gap-rollups" columns={7} />
+        {report.groups.map((g) => row(`TTL ${g.group}`, g))}
       </s-table-body>
     </s-table>
   );
@@ -316,20 +318,16 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
     ev: channels.ev.ty,
     web: channels.ecom.ty,
   };
-  const cells = (c: ChannelCells) => ({
-    total: distPct(c.total.ty, denom.total),
-    strs: distPct(c.wv.ty + c.ev.ty, denom.strs),
-    wv: distPct(c.wv.ty, denom.wv),
-    ev: distPct(c.ev.ty, denom.ev),
-    web: distPct(c.ecom.ty, denom.web),
-  });
-  const rows: Array<{ label: string; cells: ReturnType<typeof cells> }> = [
-    ...report.categories.map((c) => ({ label: c.row.key, cells: cells(c) })),
-    { label: "Total Retail", cells: cells(report.sections.retail) },
-    { label: "Total Service", cells: cells(report.sections.service) },
-    { label: "Others", cells: cells(report.sections.others) },
-    ...report.groups.map((g) => ({ label: `TTL ${g.group}`, cells: cells(g) })),
-  ];
+  const row = (label: string, c: ChannelCells) => (
+    <s-table-row key={label}>
+      <s-table-cell>{label}</s-table-cell>
+      <s-table-cell>{distPct(c.total.ty, denom.total)}</s-table-cell>
+      <s-table-cell>{distPct(c.wv.ty + c.ev.ty, denom.strs)}</s-table-cell>
+      <s-table-cell>{distPct(c.wv.ty, denom.wv)}</s-table-cell>
+      <s-table-cell>{distPct(c.ev.ty, denom.ev)}</s-table-cell>
+      <s-table-cell>{distPct(c.ecom.ty, denom.web)}</s-table-cell>
+    </s-table-row>
+  );
   return (
     <s-table>
       <s-table-header-row>
@@ -341,16 +339,13 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
         <s-table-header listSlot="labeled">WEB</s-table-header>
       </s-table-header-row>
       <s-table-body>
-        {rows.map((r) => (
-          <s-table-row key={r.label}>
-            <s-table-cell>{r.label}</s-table-cell>
-            <s-table-cell>{r.cells.total}</s-table-cell>
-            <s-table-cell>{r.cells.strs}</s-table-cell>
-            <s-table-cell>{r.cells.wv}</s-table-cell>
-            <s-table-cell>{r.cells.ev}</s-table-cell>
-            <s-table-cell>{r.cells.web}</s-table-cell>
-          </s-table-row>
-        ))}
+        {report.categories.map((c) => row(c.row.key, c))}
+        <SpacerRow key="gap-subtotals" columns={6} />
+        {row("Total Retail", report.sections.retail)}
+        {row("Total Service", report.sections.service)}
+        {row("Others", report.sections.others)}
+        <SpacerRow key="gap-rollups" columns={6} />
+        {report.groups.map((g) => row(`TTL ${g.group}`, g))}
       </s-table-body>
     </s-table>
   );
