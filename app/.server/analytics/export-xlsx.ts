@@ -134,11 +134,13 @@ function writeWeeklySheet(
     writeCategoryRow(c.row.key, c.total, c.wv, c.ev, c.ecom);
   }
   sheet.addRow([]);
-  writeCategoryRow("Total Retail", report.sections.retail.total, undefined, undefined, undefined, true);
-  writeCategoryRow("Total Service", report.sections.service.total, undefined, undefined, undefined, true);
-  writeCategoryRow("Others", report.sections.others.total, undefined, undefined, undefined, true);
+  const writeChannelCellsRow = (label: string, c: ChannelCells) =>
+    writeCategoryRow(label, c.total, c.wv, c.ev, c.ecom, true);
+  writeChannelCellsRow("Total Retail", report.sections.retail);
+  writeChannelCellsRow("Total Service", report.sections.service);
+  writeChannelCellsRow("Others", report.sections.others);
   for (const g of report.groups) {
-    writeCategoryRow(`TTL ${g.group}`, g.total, undefined, undefined, undefined, true);
+    writeChannelCellsRow(`TTL ${g.group}`, g);
   }
 
   // Distribution: the same category / section / group roll-ups expressed as

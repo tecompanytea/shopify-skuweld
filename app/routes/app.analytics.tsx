@@ -276,20 +276,20 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
         ))}
         {(
           [
-            ["Total Retail", report.sections.retail.total],
-            ["Total Service", report.sections.service.total],
-            ["Others", report.sections.others.total],
+            ["Total Retail", report.sections.retail],
+            ["Total Service", report.sections.service],
+            ["Others", report.sections.others],
             ...report.groups.map(
-              (g) => [`TTL ${g.group}`, g.total] as [string, CellPair],
+              (g) => [`TTL ${g.group}`, g] as [string, ChannelCells],
             ),
-          ] as Array<[string, CellPair]>
-        ).map(([label, pair]) => (
+          ] as Array<[string, ChannelCells]>
+        ).map(([label, cells]) => (
           <s-table-row key={label}>
             <s-table-cell>{label}</s-table-cell>
-            <PairCells pair={pair} />
-            <s-table-cell />
-            <s-table-cell />
-            <s-table-cell />
+            <PairCells pair={cells.total} />
+            <s-table-cell>{dollars(cells.wv.ty)}</s-table-cell>
+            <s-table-cell>{dollars(cells.ev.ty)}</s-table-cell>
+            <s-table-cell>{dollars(cells.ecom.ty)}</s-table-cell>
           </s-table-row>
         ))}
       </s-table-body>
