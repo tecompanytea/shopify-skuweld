@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -520,6 +520,28 @@ function ProductSellingBlock({ report }: { report: ProductSellingReport }) {
   );
 }
 
+// A card for a full-bleed table. The section drops its padding so the table
+// spans edge-to-edge; the heading gets its spacing back through an s-box.
+// This is Shopify's recommended workaround — `padding="none"` otherwise glues
+// the heading to the corner, and any spacing we add would land *inside* the
+// table rather than between the heading and the table.
+function TableCard({
+  heading,
+  children,
+}: {
+  heading: string;
+  children: ReactNode;
+}) {
+  return (
+    <s-section accessibilityLabel={heading} padding="none">
+      <s-box padding="base">
+        <s-heading>{heading}</s-heading>
+      </s-box>
+      {children}
+    </s-section>
+  );
+}
+
 export default function Analytics() {
   const {
     type,
@@ -730,37 +752,21 @@ export default function Analytics() {
       </s-section>
 
       {weekly ? (
-        // Two tables with different column counts (channel vs category), so
-        // give each its own card instead of stacking them in one section.
+        // Three tables with different column counts (channel / category /
+        // distribution), so each gets its own card.
         <>
-          <s-section
-            heading="Sales by channel"
-            accessibilityLabel="Sales by channel"
-            padding="none"
-          >
+          <TableCard heading="Sales by channel">
             <ChannelBlock report={weekly} />
-          </s-section>
-          <s-section
-            heading="Sales by category"
-            accessibilityLabel="Sales by category"
-            padding="none"
-          >
+          </TableCard>
+          <TableCard heading="Sales by category">
             <CategoryBlock report={weekly} />
-          </s-section>
-          <s-section
-            heading="Distribution"
-            accessibilityLabel="Distribution"
-            padding="none"
-          >
+          </TableCard>
+          <TableCard heading="Distribution">
             <DistributionBlock report={weekly} />
-          </s-section>
+          </TableCard>
         </>
       ) : (
-        <s-section
-          heading={reportTitle}
-          accessibilityLabel="Report"
-          padding="none"
-        >
+        <TableCard heading={reportTitle}>
           {productSelling ? (
             <ProductSellingBlock report={productSelling} />
           ) : top10 ? (
@@ -774,7 +780,7 @@ export default function Analytics() {
               </s-paragraph>
             </s-box>
           )}
-        </s-section>
+        </TableCard>
       )}
     </s-page>
   );
