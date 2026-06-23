@@ -130,19 +130,33 @@ function writeWeeklySheet(
       pctCell(row, 13, ecom.ty, ecom.ly);
     }
   };
+  const writeChannelCellsRow = (label: string, c: ChannelCells) =>
+    writeCategoryRow(label, c.total, c.wv, c.ev, c.ecom, true);
+  // All three blocks (categories, sections, groups) foot to the same grand
+  // total, so each ends with it. Invoiced is uncategorized, so it's excluded.
+  const grand: ChannelCells = {
+    total: {
+      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
+      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
+    },
+    wv: channels.wv,
+    ev: channels.ev,
+    ecom: channels.ecom,
+  };
   for (const c of report.categories) {
     writeCategoryRow(c.row.key, c.total, c.wv, c.ev, c.ecom);
   }
+  writeChannelCellsRow("TOTAL", grand);
   sheet.addRow([]);
-  const writeChannelCellsRow = (label: string, c: ChannelCells) =>
-    writeCategoryRow(label, c.total, c.wv, c.ev, c.ecom, true);
   writeChannelCellsRow("Total Retail", report.sections.retail);
   writeChannelCellsRow("Total Service", report.sections.service);
   writeChannelCellsRow("Others", report.sections.others);
+  writeChannelCellsRow("TOTAL", grand);
   sheet.addRow([]);
   for (const g of report.groups) {
     writeChannelCellsRow(`TTL ${g.group}`, g);
   }
+  writeChannelCellsRow("TOTAL", grand);
 
   // Distribution: the same category / section / group roll-ups expressed as
   // each row's share of its column. Columns are TOTAL (WV+EV+Web), STRS

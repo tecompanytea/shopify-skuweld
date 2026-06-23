@@ -266,8 +266,8 @@ function SpacerRow({ columns }: { columns: number }) {
 }
 
 function CategoryBlock({ report }: { report: WeeklyReport }) {
-  const row = (label: string, cells: ChannelCells) => (
-    <s-table-row key={label}>
+  const row = (label: string, cells: ChannelCells, key: string = label) => (
+    <s-table-row key={key}>
       <s-table-cell>{label}</s-table-cell>
       <PairCells pair={cells.total} />
       <s-table-cell>{dollars(cells.wv.ty)}</s-table-cell>
@@ -275,6 +275,18 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
       <s-table-cell>{dollars(cells.ecom.ty)}</s-table-cell>
     </s-table-row>
   );
+  // Categories, section subtotals, and group roll-ups each partition every
+  // category, so all three blocks foot to the same grand total (invoiced
+  // excluded — it isn't categorized).
+  const grand: ChannelCells = {
+    total: {
+      ty: report.channels.wv.ty + report.channels.ev.ty + report.channels.ecom.ty,
+      ly: report.channels.wv.ly + report.channels.ev.ly + report.channels.ecom.ly,
+    },
+    wv: report.channels.wv,
+    ev: report.channels.ev,
+    ecom: report.channels.ecom,
+  };
   return (
     <s-table>
       <s-table-header-row>
@@ -288,12 +300,15 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
       </s-table-header-row>
       <s-table-body>
         {report.categories.map((c) => row(c.row.key, c))}
+        {row("TOTAL", grand, "total-categories")}
         <SpacerRow key="gap-subtotals" columns={7} />
         {row("Total Retail", report.sections.retail)}
         {row("Total Service", report.sections.service)}
         {row("Others", report.sections.others)}
+        {row("TOTAL", grand, "total-sections")}
         <SpacerRow key="gap-rollups" columns={7} />
         {report.groups.map((g) => row(`TTL ${g.group}`, g))}
+        {row("TOTAL", grand, "total-groups")}
       </s-table-body>
     </s-table>
   );
