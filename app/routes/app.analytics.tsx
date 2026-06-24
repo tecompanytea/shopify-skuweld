@@ -17,6 +17,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { syncSquareOrders } from "../.server/analytics/square-sync";
 import { syncShopifyOrders } from "../.server/analytics/shopify-sync";
+import { runInBackground } from "../.server/analytics/background";
 import {
   analyticsShopOverride,
   resolveAnalyticsShop,
@@ -57,6 +58,63 @@ function refreshedLabel(at: Date, now: number): string {
   return `on ${toReportDay(at)}`;
 }
 
+// Give this route's serverless function room to finish the background pulls
+// (started via waitUntil) past the HTTP response. 300s is the Pro-plan max; on
+// Hobby lower this to 60. Either way the spinner is poll-driven and can't hang.
+export const config = { maxDuration: 300 };
+
+const SYNC_SOURCE_LABELS: Record<string, string> = {
+  "square-orders": "Square",
+  "shopify-orders": "Shopify",
+};
+// A pull that hasn't written progress for this long is treated as stalled —
+// i.e. the background function was killed (e.g. hit maxDuration). It surfaces
+// as a message instead of an endless spinner.
+const SYNC_STALE_MS = 120_000;
+
+type SyncStateRow = {
+  id: string;
+  status: string;
+  progress: string | null;
+  error: string | null;
+  updatedAt: Date;
+};
+
+// Server-side view of the two order pulls, recomputed on every poll. The
+// page's "Refreshing" state comes from here (not the fetcher), so it tracks
+// the work itself rather than the request that kicked it off.
+function summarizeSync(shop: string, states: SyncStateRow[], now: number) {
+  const rows = states
+    .map((s) => ({
+      ...s,
+      source: s.id.startsWith(`${shop}:`) ? s.id.slice(shop.length + 1) : "",
+    }))
+    .filter((s) => s.source in SYNC_SOURCE_LABELS);
+  const label = (source: string) => SYNC_SOURCE_LABELS[source] ?? source;
+  const age = (s: SyncStateRow) => now - s.updatedAt.getTime();
+  const runningFresh = rows.filter(
+    (s) => s.status === "running" && age(s) < SYNC_STALE_MS,
+  );
+  const runningStale = rows.filter(
+    (s) => s.status === "running" && age(s) >= SYNC_STALE_MS,
+  );
+  return {
+    running: runningFresh.length > 0,
+    stalled: runningFresh.length === 0 && runningStale.length > 0,
+    progress: runningFresh
+      .map((s) => `${label(s.source)}: ${s.progress ?? "…"}`)
+      .join(" · "),
+    results: rows
+      .filter((s) => s.status === "done" || s.status === "error")
+      .map((s) => ({
+        source: label(s.source),
+        ok: s.status === "done",
+        message:
+          s.status === "error" ? (s.error ?? "failed") : (s.progress ?? "done"),
+      })),
+  };
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const override = analyticsShopOverride();
@@ -94,6 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const lastRefreshedLabel = lastRefreshedAt
     ? refreshedLabel(lastRefreshedAt, now)
     : null;
+  const sync = summarizeSync(shop, syncStates, now);
 
   let weekly: WeeklyReport | null = null;
   let productSelling: ProductSellingReport | null = null;
@@ -119,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     type,
     preset,
     range,
-    syncStates,
+    sync,
     lineCount,
     stale,
     lastRefreshedLabel,
@@ -149,23 +208,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { error: "Enter dates as YYYY-MM-DD." };
   }
   const range: DayRange = { start, end };
+  const shop = session.shop;
 
-  // One Refresh pulls both sources for the viewed range. They run
-  // independently so a Square failure still lets Shopify through (and
-  // vice-versa); a partial failure surfaces the source that broke.
-  const synced: Array<{ source: string; orders: number; lines: number }> = [];
-  const errors: string[] = [];
-  try {
-    synced.push({ source: "Square", ...(await syncSquareOrders(session.shop, range)) });
-  } catch (error) {
-    errors.push(`Square — ${String(error)}`);
-  }
-  try {
-    synced.push({ source: "Shopify", ...(await syncShopifyOrders(session.shop, admin, range)) });
-  } catch (error) {
-    errors.push(`Shopify — ${String(error)}`);
-  }
-  return errors.length ? { synced, error: errors.join(" · ") } : { synced };
+  // Mark both sources running up front so the page shows the sync immediately,
+  // then pull them in the background — past the HTTP response — so a long sync
+  // can't hold the request open and hang the spinner. The pulls run
+  // independently (one failing still lets the other through) and write their
+  // own progress/results to SyncState, which the page polls.
+  await Promise.all(
+    (["square-orders", "shopify-orders"] as const).map((source) => {
+      const id = `${shop}:${source}`;
+      return prisma.syncState.upsert({
+        where: { id },
+        create: { id, shop, status: "running", progress: "Queued…" },
+        update: { status: "running", progress: "Queued…", error: null },
+      });
+    }),
+  );
+  runInBackground(() =>
+    Promise.allSettled([
+      syncSquareOrders(shop, range),
+      syncShopifyOrders(shop, admin, range),
+    ]),
+  );
+  return { started: true };
 };
 
 export const headers: HeadersFunction = (headersArgs) =>
@@ -560,7 +626,7 @@ export default function Analytics() {
     type,
     preset,
     range,
-    syncStates,
+    sync,
     lineCount,
     stale,
     lastRefreshedLabel,
@@ -572,11 +638,24 @@ export default function Analytics() {
   } = useLoaderData<typeof loader>();
   const [, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
-  const busy = fetcher.state !== "idle";
   const revalidator = useRevalidator();
 
-  // While a sync runs, re-read the loader so the live progress written to
-  // SyncState ("1,396 orders, 3,532 lines so far…") streams into the page.
+  // "Refreshing" is driven by the polled SyncState (sync.running), not the
+  // fetcher: the action returns immediately and the pulls finish in the
+  // background. `starting` bridges the brief gap between submitting and the
+  // first poll that sees the sync running.
+  const starting = fetcher.state !== "idle";
+  const busy = starting || sync.running;
+
+  // SyncState's done/error rows persist across page loads, so only show this
+  // run's result/stall banners after the user actually hit Refresh.
+  const [refreshRequested, setRefreshRequested] = useState(false);
+  useEffect(() => {
+    setRefreshRequested(false);
+  }, [range.start, range.end, type]);
+
+  // While a sync runs, re-read the loader so live progress streams in and we
+  // notice completion (or a stall).
   useEffect(() => {
     if (!busy) return;
     const interval = setInterval(() => {
@@ -584,15 +663,8 @@ export default function Analytics() {
     }, 2500);
     return () => clearInterval(interval);
   }, [busy, revalidator]);
-  const synced =
-    fetcher.data && "synced" in fetcher.data ? fetcher.data.synced : null;
-  const error =
+  const actionError =
     fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
-  // Live progress streamed into SyncState by the running pulls.
-  const progressText = syncStates
-    .filter((state) => state.status === "running" && state.progress)
-    .map((state) => `${state.id.split(":")[1]}: ${state.progress}`)
-    .join(" · ");
 
   const [pickedType, setPickedType] = useState(type);
   const [exporting, setExporting] = useState(false);
@@ -650,11 +722,13 @@ export default function Analytics() {
           : `Data may be out of date — last refreshed ${lastRefreshedLabel}. Click Refresh.`
         : `Up to date — last refreshed ${lastRefreshedLabel}.`;
 
-  const refresh = () =>
+  const refresh = () => {
+    setRefreshRequested(true);
     fetcher.submit(
       { intent: "refresh", start: range.start, end: range.end },
       { method: "post" },
     );
+  };
 
   return (
     <s-page heading="Analytics">
@@ -747,17 +821,23 @@ export default function Analytics() {
           {busy && (
             <s-stack direction="inline" gap="small-200" alignItems="center">
               <s-spinner accessibilityLabel="Refreshing" size="base" />
-              <s-text color="subdued">{progressText || "Refreshing…"}</s-text>
+              <s-text color="subdued">{sync.progress || "Refreshing…"}</s-text>
             </s-stack>
           )}
-          {error && <s-banner tone="critical">{error}</s-banner>}
-          {synced && synced.length > 0 && (
-            <s-banner tone="success">
-              {synced
-                .map(
-                  (result) =>
-                    `${result.source}: ${result.orders.toLocaleString("en-US")} orders → ${result.lines.toLocaleString("en-US")} lines`,
-                )
+          {actionError && <s-banner tone="critical">{actionError}</s-banner>}
+          {refreshRequested && sync.stalled && (
+            <s-banner tone="warning">
+              The sync stopped before finishing — it likely hit the time limit
+              for a single request. Try a smaller date range, or click Refresh
+              to resume (already-pulled data is kept).
+            </s-banner>
+          )}
+          {refreshRequested && !busy && !sync.stalled && sync.results.length > 0 && (
+            <s-banner
+              tone={sync.results.every((result) => result.ok) ? "success" : "critical"}
+            >
+              {sync.results
+                .map((result) => `${result.source}: ${result.message}`)
                 .join(" · ")}
             </s-banner>
           )}
