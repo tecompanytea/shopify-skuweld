@@ -110,13 +110,6 @@ export function PeriodPicker({
 
   const resetToApplied = () => setDraft(preset, range.start, range.end);
 
-  const hidePopover = () =>
-    (
-      document.getElementById(POPOVER_ID) as
-        | (HTMLElement & { hideOverlay?: () => void })
-        | null
-    )?.hideOverlay?.();
-
   const pickPreset = (value: string) => {
     const picked = rangeForPreset(value, today);
     if (picked) setDraft(value, picked.start, picked.end);
@@ -148,16 +141,14 @@ export function PeriodPicker({
     setDraft("custom", nextStart, nextEnd);
   };
 
+  // The popover is closed declaratively by command="--hide" on the footer
+  // buttons (the documented way); these handlers only stage the result.
   const apply = () => {
     if (!start || !end) return;
     onApply(draftPreset, { start, end });
-    hidePopover();
   };
 
-  const cancel = () => {
-    resetToApplied();
-    hidePopover();
-  };
+  const cancel = () => resetToApplied();
 
   const calendarValue = end ? `${start}--${end}` : start ? `${start}--` : "";
   const disallowFuture = `${shiftDay(today, 1)}--`;
@@ -264,8 +255,16 @@ export function PeriodPicker({
                 padding: 12,
               }}
             >
-              <s-button onClick={cancel}>Cancel</s-button>
-              <s-button variant="primary" disabled={!start || !end} onClick={apply}>
+              <s-button commandFor={POPOVER_ID} command="--hide" onClick={cancel}>
+                Cancel
+              </s-button>
+              <s-button
+                variant="primary"
+                disabled={!start || !end}
+                commandFor={POPOVER_ID}
+                command="--hide"
+                onClick={apply}
+              >
                 Apply
               </s-button>
             </div>
