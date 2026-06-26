@@ -397,7 +397,7 @@ export async function syncSquareOrdersIncremental(
   const stateId = `${shop}:square-orders`;
   const setState = makeSetState(stateId, shop);
 
-  const since = await resolveIncrementalSince(shop, "square", Date.now());
+  const since = await resolveIncrementalSince(stateId, Date.now());
   const sinceLabel = since.toISOString().slice(0, 10);
   await setState("running", `Checking changes since ${sinceLabel}`);
   try {
@@ -412,16 +412,25 @@ export async function syncSquareOrdersIncremental(
         setState("running", `${orders} orders, ${lines} lines so far`),
     );
 
-    // Atomic swap: delete + insert in one transaction so a partial failure
-    // can't advance the watermark on a half-write (see replaceSourceOrders).
+    const completedAt = new Date();
+    // Atomic: swap the touched orders' rows AND advance the watermark / mark
+    // done in one transaction, so a partial failure rolls back everything and
+    // the watermark never moves on a half-write. The watermark advances even on
+    // a zero-change refresh, so a quiet source doesn't look stale forever.
     await prisma.$transaction(
-      (tx) => replaceSourceOrders(tx, shop, "square", seenOrderIds, rows),
+      async (tx) => {
+        await replaceSourceOrders(tx, shop, "square", seenOrderIds, rows);
+        await tx.syncState.update({
+          where: { id: stateId },
+          data: {
+            status: "done",
+            progress: `${seenOrderIds.size} orders, ${rows.length} lines updated since ${sinceLabel}`,
+            error: null,
+            watermark: completedAt,
+          },
+        });
+      },
       { timeout: 50_000, maxWait: 15_000 },
-    );
-
-    await setState(
-      "done",
-      `${seenOrderIds.size} orders, ${rows.length} lines updated since ${sinceLabel}`,
     );
     return { lines: rows.length, orders: seenOrderIds.size };
   } catch (error) {

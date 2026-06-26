@@ -6,19 +6,20 @@ import { computeIncrementalSince } from "../../lib/incremental-window";
 // app/lib/incremental-window.ts (no Prisma) so it stays unit-testable and the
 // route loader can import the constants without pulling in server-only code.
 
-// Watermark = the newest row we've written for this source. Every write stamps
-// syncedAt, so max(syncedAt) is effectively "when we last synced up to" — a
-// usable high-water mark without a dedicated column.
+// Read the per-source watermark (SyncState.watermark) — the instant the last
+// successful pull finished. Advances on every success, including no-op refreshes
+// that found zero changed orders, so a quiet source doesn't keep rescanning the
+// same window. Null (never succeeded) → computeIncrementalSince reaches back the
+// max window.
 export async function resolveIncrementalSince(
-  shop: string,
-  source: string,
+  stateId: string,
   nowMs: number,
 ): Promise<Date> {
-  const agg = await prisma.salesLine.aggregate({
-    _max: { syncedAt: true },
-    where: { shop, source },
+  const state = await prisma.syncState.findUnique({
+    where: { id: stateId },
+    select: { watermark: true },
   });
-  return computeIncrementalSince(agg._max.syncedAt, nowMs);
+  return computeIncrementalSince(state?.watermark ?? null, nowMs);
 }
 
 // Per-order replace, run inside a transaction by the caller: drop every line

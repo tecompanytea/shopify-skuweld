@@ -299,7 +299,7 @@ export async function syncShopifyOrdersIncremental(
   const stateId = `${shop}:shopify-orders`;
   const setState = makeSetState(stateId, shop);
 
-  const since = await resolveIncrementalSince(shop, "shopify", Date.now());
+  const since = await resolveIncrementalSince(stateId, Date.now());
   const sinceLabel = since.toISOString().slice(0, 10);
   await setState("running", `Checking changes since ${sinceLabel}`);
   try {
@@ -315,17 +315,26 @@ export async function syncShopifyOrdersIncremental(
           setState("running", `${orders} orders, ${lines} lines so far`),
       );
 
-    // Atomic swap: delete + insert in one transaction so a partial failure
-    // can't advance the watermark on a half-write (see replaceSourceOrders).
-    await prisma.$transaction(
-      (tx) => replaceSourceOrders(tx, shop, "shopify", seenOrderIds, rows),
-      { timeout: 50_000, maxWait: 15_000 },
-    );
-
     const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
-    await setState(
-      "done",
-      `${countedOrders.size} orders, ${rows.length} lines updated since ${sinceLabel}${note}`,
+    const completedAt = new Date();
+    // Atomic: swap the touched orders' rows AND advance the watermark / mark
+    // done in one transaction, so a partial failure rolls back everything and
+    // the watermark never moves on a half-write. The watermark advances even on
+    // a zero-change refresh, so a quiet source doesn't look stale forever.
+    await prisma.$transaction(
+      async (tx) => {
+        await replaceSourceOrders(tx, shop, "shopify", seenOrderIds, rows);
+        await tx.syncState.update({
+          where: { id: stateId },
+          data: {
+            status: "done",
+            progress: `${countedOrders.size} orders, ${rows.length} lines updated since ${sinceLabel}${note}`,
+            error: null,
+            watermark: completedAt,
+          },
+        });
+      },
+      { timeout: 50_000, maxWait: 15_000 },
     );
     return { lines: rows.length, orders: countedOrders.size };
   } catch (error) {
