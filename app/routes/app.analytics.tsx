@@ -125,30 +125,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const preset = url.searchParams.get("preset") ?? "last-week";
   const range = resolveRange(url.searchParams);
 
-  const [syncStates, lineCount, lastSyncedAgg] = await Promise.all([
+  const [syncStates, lineCount, syncedBySource] = await Promise.all([
     prisma.syncState.findMany({ where: { shop } }),
     prisma.salesLine.count({ where: { shop } }),
-    prisma.salesLine.aggregate({ _max: { syncedAt: true }, where: { shop } }),
+    prisma.salesLine.groupBy({
+      by: ["source"],
+      _max: { syncedAt: true },
+      where: { shop },
+    }),
   ]);
 
-  // Freshness in the incremental model: Refresh re-pulls only the recent "live"
-  // window — orders that can still change (new sales, refunds). Anything older
-  // is immutable and read straight from the table, so a report ending before
-  // the window is always current and never needs a pull. A report touching the
-  // live window is stale if we haven't synced in a while. Watermark = the most
-  // recent write across all sources (max syncedAt).
+  // Freshness in the incremental model, evaluated PER SOURCE. Refresh re-pulls
+  // only the recent "live" window — orders that can still change (new sales,
+  // refunds); anything older is immutable and read straight from the table, so
+  // a report ending before the window is always current. A live report is
+  // "up to date" only if BOTH the Square (in-store) and Shopify (online) pulls
+  // are recent AND healthy — a stale or failed source must not be masked by the
+  // other being fresh.
   const now = Date.now();
   const liveCutoffDay = toReportDay(new Date(now - INCREMENTAL_MAX_WINDOW_MS));
   const historical = range.end < liveCutoffDay;
-  const lastSyncedAt = lastSyncedAgg._max.syncedAt;
-  let stale: boolean;
-  if (!lastSyncedAt) {
-    stale = true; // nothing synced anywhere yet
-  } else if (historical) {
-    stale = false; // viewing the immutable past
-  } else {
-    stale = now - lastSyncedAt.getTime() > 6 * 60 * 60 * 1000; // > 6h since last sync
-  }
+  const STALE_MS = 6 * 60 * 60 * 1000; // > 6h since a source last synced
+  const SYNC_SOURCES = ["square", "shopify"] as const;
+  const syncedAtBy = new Map(
+    syncedBySource.map((r) => [r.source, r._max.syncedAt] as const),
+  );
+  const sourceFresh = SYNC_SOURCES.map((src) => {
+    const at = syncedAtBy.get(src) ?? null;
+    const errored =
+      syncStates.find((s) => s.id === `${shop}:${src}-orders`)?.status ===
+      "error";
+    return !errored && at !== null && now - at.getTime() <= STALE_MS;
+  });
+  // Display the laggard source's age; null if any source has never synced.
+  const ages = SYNC_SOURCES.map((src) => syncedAtBy.get(src) ?? null);
+  const lastSyncedAt = ages.some((a) => a === null)
+    ? null
+    : new Date(Math.min(...ages.map((a) => a!.getTime())));
+  const stale = historical ? false : sourceFresh.some((fresh) => !fresh);
   const lastSyncedLabel = lastSyncedAt ? refreshedLabel(lastSyncedAt, now) : null;
   const sync = summarizeSync(shop, syncStates, now);
 

@@ -2,7 +2,7 @@ import prisma from "../../db.server";
 import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 import {
   resolveIncrementalSince,
-  deleteLinesForOrders,
+  replaceSourceOrders,
 } from "./incremental";
 
 // Pulls Shopify sales into the SalesLine fact table (channel ECOM) from the
@@ -66,8 +66,8 @@ interface OrdersQueryResult {
 }
 
 const ORDERS_QUERY = `#graphql
-  query SkuweldAnalyticsAgreements($first: Int!, $after: String, $search: String!) {
-    orders(first: $first, after: $after, query: $search, sortKey: PROCESSED_AT) {
+  query SkuweldAnalyticsAgreements($first: Int!, $after: String, $search: String!, $sortKey: OrderSortKeys!) {
+    orders(first: $first, after: $after, query: $search, sortKey: $sortKey) {
       nodes {
         id
         test
@@ -136,6 +136,7 @@ async function collectAgreementRows(
   admin: AdminClient,
   shop: string,
   search: string,
+  sortKey: "PROCESSED_AT" | "UPDATED_AT",
   dayFilter: DayRange | null,
   onProgress: (orders: number, lines: number) => Promise<unknown>,
 ): Promise<CollectResult> {
@@ -149,7 +150,7 @@ async function collectAgreementRows(
 
   while (hasNextPage) {
     const response = await admin.graphql(ORDERS_QUERY, {
-      variables: { first: 100, after, search },
+      variables: { first: 100, after, search, sortKey },
     });
     const json = (await response.json()) as OrdersQueryResult;
 
@@ -260,6 +261,7 @@ export async function syncShopifyOrders(
       admin,
       shop,
       search,
+      "PROCESSED_AT",
       range,
       (orders, lines) =>
         setState("running", `${orders} orders, ${lines} lines so far`),
@@ -303,12 +305,22 @@ export async function syncShopifyOrdersIncremental(
   try {
     const search = `updated_at:>='${since.toISOString()}'`;
     const { rows, seenOrderIds, countedOrders, truncated } =
-      await collectAgreementRows(admin, shop, search, null, (orders, lines) =>
-        setState("running", `${orders} orders, ${lines} lines so far`),
+      await collectAgreementRows(
+        admin,
+        shop,
+        search,
+        "UPDATED_AT",
+        null,
+        (orders, lines) =>
+          setState("running", `${orders} orders, ${lines} lines so far`),
       );
 
-    await deleteLinesForOrders(shop, "shopify", seenOrderIds);
-    await insertRows(rows);
+    // Atomic swap: delete + insert in one transaction so a partial failure
+    // can't advance the watermark on a half-write (see replaceSourceOrders).
+    await prisma.$transaction(
+      (tx) => replaceSourceOrders(tx, shop, "shopify", seenOrderIds, rows),
+      { timeout: 50_000, maxWait: 15_000 },
+    );
 
     const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
     await setState(

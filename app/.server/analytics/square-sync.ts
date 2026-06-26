@@ -3,7 +3,7 @@ import { squareFetch } from "../square/client";
 import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 import {
   resolveIncrementalSince,
-  deleteLinesForOrders,
+  replaceSourceOrders,
 } from "./incremental";
 
 // Pulls Square orders (sales + itemized returns) into the SalesLine fact
@@ -412,8 +412,12 @@ export async function syncSquareOrdersIncremental(
         setState("running", `${orders} orders, ${lines} lines so far`),
     );
 
-    await deleteLinesForOrders(shop, "square", seenOrderIds);
-    await insertRows(rows);
+    // Atomic swap: delete + insert in one transaction so a partial failure
+    // can't advance the watermark on a half-write (see replaceSourceOrders).
+    await prisma.$transaction(
+      (tx) => replaceSourceOrders(tx, shop, "square", seenOrderIds, rows),
+      { timeout: 50_000, maxWait: 15_000 },
+    );
 
     await setState(
       "done",
