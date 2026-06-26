@@ -869,7 +869,7 @@ export default function Analytics() {
                 return (
                   <s-box
                     key={key}
-                    background={active ? "subdued" : undefined}
+                    background={active ? "strong" : undefined}
                     borderRadius="base"
                   >
                     <s-button
