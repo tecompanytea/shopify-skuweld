@@ -1,5 +1,9 @@
 import prisma from "../../db.server";
 import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
+import {
+  resolveIncrementalSince,
+  deleteLinesForOrders,
+} from "./incremental";
 
 // Pulls Shopify sales into the SalesLine fact table (channel ECOM) from the
 // order's *sales agreements* — the same event ledger Shopify Analytics
@@ -105,6 +109,137 @@ function toCents(amount: string): number {
   return Math.round(parseFloat(amount) * 100);
 }
 
+function makeSetState(stateId: string, shop: string) {
+  return (status: string, progress?: string, error?: string) =>
+    prisma.syncState.upsert({
+      where: { id: stateId },
+      create: { id: stateId, shop, status, progress, error },
+      update: { status, progress, error: error ?? null },
+    });
+}
+
+interface CollectResult {
+  rows: Array<Record<string, unknown>>;
+  // Every non-test order the search returned (the delete scope for an
+  // incremental, per-order replace).
+  seenOrderIds: Set<string>;
+  // Orders that actually contributed a product line (the user-facing count).
+  countedOrders: Set<string>;
+  truncated: number;
+}
+
+// Paginate the order search and turn each PRODUCT sale agreement into a fact
+// row. `dayFilter` (range mode) keeps only agreements whose bucketed day falls
+// in the window; null (incremental mode) keeps every agreement of a touched
+// order, so the stored order is always complete.
+async function collectAgreementRows(
+  admin: AdminClient,
+  shop: string,
+  search: string,
+  dayFilter: DayRange | null,
+  onProgress: (orders: number, lines: number) => Promise<unknown>,
+): Promise<CollectResult> {
+  const rows: Array<Record<string, unknown>> = [];
+  const seenOrderIds = new Set<string>();
+  const countedOrders = new Set<string>();
+  let truncated = 0;
+  let after: string | null = null;
+  let hasNextPage = true;
+  let throttleRetries = 0;
+
+  while (hasNextPage) {
+    const response = await admin.graphql(ORDERS_QUERY, {
+      variables: { first: 100, after, search },
+    });
+    const json = (await response.json()) as OrdersQueryResult;
+
+    // Errors must never read as "no more data" — that would silently truncate
+    // the sync (and the delete+insert would wipe orders it never re-fetched).
+    if (json.errors?.length) {
+      const throttled = json.errors.some(
+        (e) => e.extensions?.code === "THROTTLED",
+      );
+      if (throttled && throttleRetries < 10) {
+        throttleRetries += 1;
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        continue; // retry the same page
+      }
+      throw new Error(
+        `Shopify GraphQL errors: ${json.errors
+          .map((e) => e.message ?? e.extensions?.code)
+          .join("; ")}`,
+      );
+    }
+    throttleRetries = 0;
+    const orders = json.data?.orders;
+    if (!orders) {
+      throw new Error("Shopify GraphQL returned no data and no errors");
+    }
+
+    for (const order of orders.nodes) {
+      if (order.test) continue;
+      seenOrderIds.add(order.id);
+      if (order.agreements.pageInfo.hasNextPage) truncated += 1;
+
+      for (const agreement of order.agreements.nodes) {
+        const occurredAt = new Date(agreement.happenedAt);
+        const day = toReportDay(occurredAt);
+        if (dayFilter && !dayInRange(day, dayFilter)) continue;
+        if (agreement.sales.pageInfo.hasNextPage) truncated += 1;
+
+        for (const sale of agreement.sales.nodes) {
+          if (sale.lineType !== "PRODUCT" || !sale.lineItem) continue;
+          countedOrders.add(order.id);
+          // Signed by Shopify already: returns arrive negative.
+          // totalAmount includes taxes; net sales is pre-tax.
+          const tax = toCents(sale.totalTaxAmount.shopMoney.amount);
+          const net = toCents(sale.totalAmount.shopMoney.amount) - tax;
+          const discount = toCents(
+            sale.totalDiscountAmountBeforeTaxes.shopMoney.amount,
+          );
+          rows.push({
+            id: `sh:${sale.id}`,
+            shop,
+            source: "shopify",
+            channel: "ECOM",
+            kind: sale.actionType === "RETURN" ? "return" : "sale",
+            orderId: order.id,
+            occurredAt,
+            day,
+            sku: sale.lineItem.sku,
+            itemName: sale.lineItem.name,
+            variationName: sale.lineItem.variantTitle,
+            category: sale.lineItem.product?.productType || null,
+            quantity: sale.quantity ?? 0,
+            grossCents: net + discount,
+            discountCents: discount,
+            netCents: net,
+            taxCents: tax,
+          });
+        }
+      }
+    }
+
+    hasNextPage = orders.pageInfo.hasNextPage;
+    after = orders.pageInfo.endCursor;
+    await onProgress(countedOrders.size, rows.length);
+  }
+
+  return { rows, seenOrderIds, countedOrders, truncated };
+}
+
+async function insertRows(rows: Array<Record<string, unknown>>): Promise<void> {
+  for (let i = 0; i < rows.length; i += 1000) {
+    await prisma.salesLine.createMany({
+      data: rows.slice(i, i + 1000) as never,
+      skipDuplicates: true,
+    });
+  }
+}
+
+// Range mode (full/explicit windows — used by the backfill script). Searches
+// orders by processed_at across the window plus a lookback for backdated
+// edit/refund agreements, then replaces the day-window wholesale.
 export async function syncShopifyOrders(
   shop: string,
   admin: AdminClient,
@@ -112,114 +247,23 @@ export async function syncShopifyOrders(
   lookbackDays = 45,
 ): Promise<{ lines: number; orders: number }> {
   const stateId = `${shop}:shopify-orders`;
-  const setState = (status: string, progress?: string, error?: string) =>
-    prisma.syncState.upsert({
-      where: { id: stateId },
-      create: { id: stateId, shop, status, progress, error },
-      update: { status, progress, error: error ?? null },
-    });
+  const setState = makeSetState(stateId, shop);
 
   await setState("running", `Starting ${range.start} → ${range.end}`);
   try {
     const { startAt, endAt } = rangeToInstants(range);
-    // Agreements in the window can live on orders processed earlier (edits or
-    // refunds of older orders), so search a bit before the window and bucket
-    // each agreement by its own happenedAt. The lookback is small by default:
-    // an in-app Refresh on Vercel's free plan must finish inside the 60s
-    // function limit, and scanning a full year of orders blows past it (the
-    // pull gets killed mid-run and the spinner hangs). Tradeoff: a refund/edit
-    // of an order OLDER than `lookbackDays` won't surface via Refresh — the
-    // deep history is caught by scripts/backfill.ts, which passes a wide value.
     const searchStart = new Date(startAt);
     searchStart.setUTCDate(searchStart.getUTCDate() - lookbackDays);
     const search = `processed_at:>='${searchStart.toISOString()}' AND processed_at:<='${endAt.toISOString()}'`;
 
-    const rows: Array<Record<string, unknown>> = [];
-    const countedOrders = new Set<string>();
-    let truncated = 0;
-    let after: string | null = null;
-    let hasNextPage = true;
-
-    let throttleRetries = 0;
-    while (hasNextPage) {
-      const response = await admin.graphql(ORDERS_QUERY, {
-        variables: { first: 100, after, search },
-      });
-      const json = (await response.json()) as OrdersQueryResult;
-
-      // Errors must never read as "no more data" — that would silently
-      // truncate the sync (and the delete+insert would wipe the window).
-      if (json.errors?.length) {
-        const throttled = json.errors.some(
-          (e) => e.extensions?.code === "THROTTLED",
-        );
-        if (throttled && throttleRetries < 10) {
-          throttleRetries += 1;
-          await new Promise((resolve) => setTimeout(resolve, 2500));
-          continue; // retry the same page
-        }
-        throw new Error(
-          `Shopify GraphQL errors: ${json.errors
-            .map((e) => e.message ?? e.extensions?.code)
-            .join("; ")}`,
-        );
-      }
-      throttleRetries = 0;
-      const orders = json.data?.orders;
-      if (!orders) {
-        throw new Error("Shopify GraphQL returned no data and no errors");
-      }
-
-      for (const order of orders.nodes) {
-        if (order.test) continue;
-        if (order.agreements.pageInfo.hasNextPage) truncated += 1;
-
-        for (const agreement of order.agreements.nodes) {
-          const occurredAt = new Date(agreement.happenedAt);
-          const day = toReportDay(occurredAt);
-          if (!dayInRange(day, range)) continue;
-          if (agreement.sales.pageInfo.hasNextPage) truncated += 1;
-
-          for (const sale of agreement.sales.nodes) {
-            if (sale.lineType !== "PRODUCT" || !sale.lineItem) continue;
-            countedOrders.add(order.id);
-            // Signed by Shopify already: returns arrive negative.
-            // totalAmount includes taxes; net sales is pre-tax.
-            const tax = toCents(sale.totalTaxAmount.shopMoney.amount);
-            const net = toCents(sale.totalAmount.shopMoney.amount) - tax;
-            const discount = toCents(
-              sale.totalDiscountAmountBeforeTaxes.shopMoney.amount,
-            );
-            rows.push({
-              id: `sh:${sale.id}`,
-              shop,
-              source: "shopify",
-              channel: "ECOM",
-              kind: sale.actionType === "RETURN" ? "return" : "sale",
-              orderId: order.id,
-              occurredAt,
-              day,
-              sku: sale.lineItem.sku,
-              itemName: sale.lineItem.name,
-              variationName: sale.lineItem.variantTitle,
-              category: sale.lineItem.product?.productType || null,
-              quantity: sale.quantity ?? 0,
-              grossCents: net + discount,
-              discountCents: discount,
-              netCents: net,
-              taxCents: tax,
-            });
-          }
-        }
-      }
-
-      hasNextPage = orders.pageInfo.hasNextPage;
-      after = orders.pageInfo.endCursor;
-      await setState(
-        "running",
-        `${countedOrders.size} orders, ${rows.length} lines so far`,
-      );
-    }
+    const { rows, countedOrders, truncated } = await collectAgreementRows(
+      admin,
+      shop,
+      search,
+      range,
+      (orders, lines) =>
+        setState("running", `${orders} orders, ${lines} lines so far`),
+    );
 
     await prisma.salesLine.deleteMany({
       where: {
@@ -228,17 +272,48 @@ export async function syncShopifyOrders(
         day: { gte: range.start, lte: range.end },
       },
     });
-    for (let i = 0; i < rows.length; i += 1000) {
-      await prisma.salesLine.createMany({
-        data: rows.slice(i, i + 1000) as never,
-        skipDuplicates: true,
-      });
-    }
+    await insertRows(rows);
 
     const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
     await setState(
       "done",
       `${range.start} → ${range.end}: ${countedOrders.size} orders, ${rows.length} lines${note}`,
+    );
+    return { lines: rows.length, orders: countedOrders.size };
+  } catch (error) {
+    await setState("error", undefined, String(error));
+    throw error;
+  }
+}
+
+// Incremental mode (the app's Refresh). Pulls only orders updated since the
+// watermark, keeps each touched order's full agreement history, and replaces
+// those orders' lines in place — so late refunds/edits of older orders are
+// caught (the refund bumps updatedAt) without ever rescanning history.
+export async function syncShopifyOrdersIncremental(
+  shop: string,
+  admin: AdminClient,
+): Promise<{ lines: number; orders: number }> {
+  const stateId = `${shop}:shopify-orders`;
+  const setState = makeSetState(stateId, shop);
+
+  const since = await resolveIncrementalSince(shop, "shopify", Date.now());
+  const sinceLabel = since.toISOString().slice(0, 10);
+  await setState("running", `Checking changes since ${sinceLabel}`);
+  try {
+    const search = `updated_at:>='${since.toISOString()}'`;
+    const { rows, seenOrderIds, countedOrders, truncated } =
+      await collectAgreementRows(admin, shop, search, null, (orders, lines) =>
+        setState("running", `${orders} orders, ${lines} lines so far`),
+      );
+
+    await deleteLinesForOrders(shop, "shopify", seenOrderIds);
+    await insertRows(rows);
+
+    const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
+    await setState(
+      "done",
+      `${countedOrders.size} orders, ${rows.length} lines updated since ${sinceLabel}${note}`,
     );
     return { lines: rows.length, orders: countedOrders.size };
   } catch (error) {
