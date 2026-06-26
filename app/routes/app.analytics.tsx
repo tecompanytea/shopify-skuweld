@@ -852,7 +852,7 @@ export default function Analytics() {
         // (channel / category / distribution); a segmented tab bar keeps each
         // in its own view so the width never jumps between stacked tables.
         <s-section accessibilityLabel="Weekly report" padding="none">
-          <s-box padding="base">
+          <s-box padding="small">
             <s-stack direction="inline" gap="small-200">
               {(
                 [
