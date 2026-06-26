@@ -861,26 +861,24 @@ export default function Analytics() {
                   ["distribution", "Distribution"],
                 ] as const
               ).map(([key, label]) => {
-                // No tabs primitive in Polaris web components, so emulate the
-                // admin tab look: the selected tab gets the hover-grey pill
-                // (subdued background) and darker/strong text; the rest stay
-                // plain and subdued.
+                // No tabs primitive in Polaris web components. Match the admin
+                // Polaris-Tabs look: every tab is the same tertiary button; the
+                // selected one only differs by the hover-grey pill behind it
+                // (subdued background) — the text styling is identical.
                 const active = weeklyTab === key;
                 return (
-                  <s-clickable
+                  <s-box
                     key={key}
-                    onClick={() => setWeeklyTab(key)}
-                    padding="small-200"
-                    borderRadius="base"
                     background={active ? "subdued" : undefined}
+                    borderRadius="base"
                   >
-                    <s-text
-                      type={active ? "strong" : undefined}
-                      color={active ? undefined : "subdued"}
+                    <s-button
+                      variant="tertiary"
+                      onClick={() => setWeeklyTab(key)}
                     >
                       {label}
-                    </s-text>
-                  </s-clickable>
+                    </s-button>
+                  </s-box>
                 );
               })}
             </s-stack>
