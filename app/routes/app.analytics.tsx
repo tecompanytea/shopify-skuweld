@@ -860,15 +860,29 @@ export default function Analytics() {
                   ["category", "Category"],
                   ["distribution", "Distribution"],
                 ] as const
-              ).map(([key, label]) => (
-                <s-button
-                  key={key}
-                  variant={weeklyTab === key ? "secondary" : "tertiary"}
-                  onClick={() => setWeeklyTab(key)}
-                >
-                  {label}
-                </s-button>
-              ))}
+              ).map(([key, label]) => {
+                // No tabs primitive in Polaris web components, so emulate the
+                // admin tab look: the selected tab gets the hover-grey pill
+                // (subdued background) and darker/strong text; the rest stay
+                // plain and subdued.
+                const active = weeklyTab === key;
+                return (
+                  <s-clickable
+                    key={key}
+                    onClick={() => setWeeklyTab(key)}
+                    padding="small-200"
+                    borderRadius="base"
+                    background={active ? "subdued" : undefined}
+                  >
+                    <s-text
+                      type={active ? "strong" : undefined}
+                      color={active ? undefined : "subdued"}
+                    >
+                      {label}
+                    </s-text>
+                  </s-clickable>
+                );
+              })}
             </s-stack>
           </s-box>
           {weeklyTab === "channel" ? (
