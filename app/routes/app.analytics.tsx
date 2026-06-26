@@ -668,6 +668,9 @@ export default function Analytics() {
 
   const [pickedType, setPickedType] = useState(type);
   const [exporting, setExporting] = useState(false);
+  const [weeklyTab, setWeeklyTab] = useState<
+    "channel" | "category" | "distribution"
+  >("channel");
 
   const currentParams = () => {
     const params: Record<string, string> = { type: pickedType, preset };
@@ -845,19 +848,38 @@ export default function Analytics() {
       </s-section>
 
       {weekly ? (
-        // Three tables with different column counts (channel / category /
-        // distribution), so each gets its own card.
-        <>
-          <TableCard heading="Sales by channel">
+        // One card, three tabs. The tables have different column counts
+        // (channel / category / distribution); a segmented tab bar keeps each
+        // in its own view so the width never jumps between stacked tables.
+        <s-section accessibilityLabel="Weekly report" padding="none">
+          <s-box padding="base">
+            <s-button-group gap="none">
+              {(
+                [
+                  ["channel", "Channel"],
+                  ["category", "Category"],
+                  ["distribution", "Distribution"],
+                ] as const
+              ).map(([key, label]) => (
+                <s-button
+                  key={key}
+                  slot="secondary-actions"
+                  variant={weeklyTab === key ? "primary" : "tertiary"}
+                  onClick={() => setWeeklyTab(key)}
+                >
+                  {label}
+                </s-button>
+              ))}
+            </s-button-group>
+          </s-box>
+          {weeklyTab === "channel" ? (
             <ChannelBlock report={weekly} />
-          </TableCard>
-          <TableCard heading="Sales by category">
+          ) : weeklyTab === "category" ? (
             <CategoryBlock report={weekly} />
-          </TableCard>
-          <TableCard heading="Distribution">
+          ) : (
             <DistributionBlock report={weekly} />
-          </TableCard>
-        </>
+          )}
+        </s-section>
       ) : (
         <TableCard heading={reportTitle}>
           {productSelling ? (
