@@ -109,6 +109,7 @@ export async function syncShopifyOrders(
   shop: string,
   admin: AdminClient,
   range: DayRange,
+  lookbackDays = 45,
 ): Promise<{ lines: number; orders: number }> {
   const stateId = `${shop}:shopify-orders`;
   const setState = (status: string, progress?: string, error?: string) =>
@@ -121,11 +122,16 @@ export async function syncShopifyOrders(
   await setState("running", `Starting ${range.start} → ${range.end}`);
   try {
     const { startAt, endAt } = rangeToInstants(range);
-    // Agreements in the window can live on orders processed earlier
-    // (edits/refunds of old orders); widen the order search a year back and
-    // bucket each agreement by its own happenedAt.
+    // Agreements in the window can live on orders processed earlier (edits or
+    // refunds of older orders), so search a bit before the window and bucket
+    // each agreement by its own happenedAt. The lookback is small by default:
+    // an in-app Refresh on Vercel's free plan must finish inside the 60s
+    // function limit, and scanning a full year of orders blows past it (the
+    // pull gets killed mid-run and the spinner hangs). Tradeoff: a refund/edit
+    // of an order OLDER than `lookbackDays` won't surface via Refresh — the
+    // deep history is caught by scripts/backfill.ts, which passes a wide value.
     const searchStart = new Date(startAt);
-    searchStart.setUTCFullYear(searchStart.getUTCFullYear() - 1);
+    searchStart.setUTCDate(searchStart.getUTCDate() - lookbackDays);
     const search = `processed_at:>='${searchStart.toISOString()}' AND processed_at:<='${endAt.toISOString()}'`;
 
     const rows: Array<Record<string, unknown>> = [];

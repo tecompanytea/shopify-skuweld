@@ -79,7 +79,9 @@ if (only !== "square") {
     start: monthRange(fromY, fromM).start,
     end: monthRange(toY, toM).end,
   };
-  const sh = await syncShopifyOrders(shop, admin, fullRange);
+  // Wide lookback for the deep backfill — catch edits of orders up to a year
+  // before the window. (The in-app Refresh uses a small default for speed.)
+  const sh = await syncShopifyOrders(shop, admin, fullRange, 365);
   totalLines += sh.lines;
   console.log(
     `shopify ${fullRange.start} → ${fullRange.end}: ${sh.orders} orders / ${sh.lines} lines`,
