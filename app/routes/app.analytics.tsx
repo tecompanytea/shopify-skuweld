@@ -15,9 +15,10 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { syncSquareOrders } from "../.server/analytics/square-sync";
-import { syncShopifyOrders } from "../.server/analytics/shopify-sync";
+import { syncSquareOrdersIncremental } from "../.server/analytics/square-sync";
+import { syncShopifyOrdersIncremental } from "../.server/analytics/shopify-sync";
 import { runInBackground } from "../.server/analytics/background";
+import { INCREMENTAL_MAX_WINDOW_MS } from "../lib/incremental-window";
 import {
   analyticsShopOverride,
   resolveAnalyticsShop,
@@ -42,7 +43,7 @@ import {
   type UnitsBySizeReport,
 } from "../.server/analytics/units-by-size-report";
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
-import { rangeToInstants, toReportDay, type DayRange } from "../lib/periods";
+import { toReportDay } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
 
 // Human "last refreshed" label for the freshness line under the report.
@@ -124,34 +125,42 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const preset = url.searchParams.get("preset") ?? "last-week";
   const range = resolveRange(url.searchParams);
 
-  const [syncStates, lineCount, refreshAgg] = await Promise.all([
+  const [syncStates, lineCount] = await Promise.all([
     prisma.syncState.findMany({ where: { shop } }),
     prisma.salesLine.count({ where: { shop } }),
-    prisma.salesLine.aggregate({
-      _max: { syncedAt: true },
-      where: { shop, day: { gte: range.start, lte: range.end } },
-    }),
   ]);
 
-  // Freshness of the *viewed range*: when were its sales lines last pulled?
-  // A range is fresh only once it's been refreshed after the period it covers
-  // closed; a still-open range (ends today) goes stale an hour after the last
-  // pull as new orders arrive; a range with no rows is stale by definition —
-  // that's the "TY shows 0 until you hit refresh" case.
-  const lastRefreshedAt = refreshAgg._max.syncedAt;
-  const today = toReportDay(new Date());
+  // Freshness in the incremental model, evaluated PER SOURCE from each source's
+  // watermark (the last successful pull — which advances even on a no-op
+  // refresh) and status. Refresh re-pulls only the recent "live" window;
+  // anything older is immutable, so a report ending before the window is always
+  // current. A live report is "up to date" only if BOTH the Square (in-store)
+  // and Shopify (online) pulls are recent AND healthy — a stale or failed
+  // source must not be masked by the other being fresh.
   const now = Date.now();
-  let stale: boolean;
-  if (!lastRefreshedAt) {
-    stale = true;
-  } else if (range.end >= today) {
-    stale = now - lastRefreshedAt.getTime() > 60 * 60 * 1000;
-  } else {
-    stale = lastRefreshedAt.getTime() < rangeToInstants(range).endAt.getTime();
-  }
-  const lastRefreshedLabel = lastRefreshedAt
-    ? refreshedLabel(lastRefreshedAt, now)
-    : null;
+  const liveCutoffDay = toReportDay(new Date(now - INCREMENTAL_MAX_WINDOW_MS));
+  const historical = range.end < liveCutoffDay;
+  const STALE_MS = 6 * 60 * 60 * 1000; // a source is stale 6h after its last sync
+  const SYNC_SOURCES = ["square", "shopify"] as const;
+  const stateBy = new Map(syncStates.map((s) => [s.id, s] as const));
+  const watermarks = SYNC_SOURCES.map(
+    (src) => stateBy.get(`${shop}:${src}-orders`)?.watermark ?? null,
+  );
+  const errored = SYNC_SOURCES.map(
+    (src) => stateBy.get(`${shop}:${src}-orders`)?.status === "error",
+  );
+  const sourceFresh = SYNC_SOURCES.map(
+    (_src, i) =>
+      !errored[i] &&
+      watermarks[i] !== null &&
+      now - watermarks[i]!.getTime() <= STALE_MS,
+  );
+  // Display the laggard source's age; null if any source has never synced.
+  const lastSyncedAt = watermarks.some((w) => w === null)
+    ? null
+    : new Date(Math.min(...watermarks.map((w) => w!.getTime())));
+  const stale = historical ? false : sourceFresh.some((fresh) => !fresh);
+  const lastSyncedLabel = lastSyncedAt ? refreshedLabel(lastSyncedAt, now) : null;
   const sync = summarizeSync(shop, syncStates, now);
 
   let weekly: WeeklyReport | null = null;
@@ -181,7 +190,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     sync,
     lineCount,
     stale,
-    lastRefreshedLabel,
+    historical,
+    lastSyncedLabel,
     override,
     weekly,
     productSelling,
@@ -202,17 +212,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (form.get("intent") !== "refresh") {
     return { error: "Unknown action" };
   }
-  const start = String(form.get("start") ?? "");
-  const end = String(form.get("end") ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
-    return { error: "Enter dates as YYYY-MM-DD." };
-  }
-  const range: DayRange = { start, end };
   const shop = session.shop;
 
   // Mark both sources running up front so the page shows the sync immediately,
-  // then pull them in the background — past the HTTP response — so a long sync
-  // can't hold the request open and hang the spinner. The pulls run
+  // then pull in the background — past the HTTP response — only what changed
+  // since the last sync (high-watermark incremental). The pulls run
   // independently (one failing still lets the other through) and write their
   // own progress/results to SyncState, which the page polls.
   await Promise.all(
@@ -227,8 +231,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   );
   runInBackground(() =>
     Promise.allSettled([
-      syncSquareOrders(shop, range),
-      syncShopifyOrders(shop, admin, range),
+      syncSquareOrdersIncremental(shop),
+      syncShopifyOrdersIncremental(shop, admin),
     ]),
   );
   return { started: true };
@@ -629,7 +633,8 @@ export default function Analytics() {
     sync,
     lineCount,
     stale,
-    lastRefreshedLabel,
+    historical,
+    lastSyncedLabel,
     override,
     weekly,
     productSelling,
@@ -715,22 +720,25 @@ export default function Analytics() {
   const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? top10?.lyRange ?? null;
 
   const freshnessText =
-    lastRefreshedLabel === null
-      ? override
-        ? "No data for this range."
-        : "No data for this range yet — click Refresh to pull it."
-      : stale
+    lastSyncedLabel === null
+      ? lineCount === 0
         ? override
-          ? `Last refreshed ${lastRefreshedLabel}.`
-          : `Data may be out of date — last refreshed ${lastRefreshedLabel}. Click Refresh.`
-        : `Up to date — last refreshed ${lastRefreshedLabel}.`;
+          ? "No data."
+          : "No data yet — click Refresh to pull recent sales (full history needs a backfill)."
+        : override
+          ? "Sync time unknown."
+          : "Click Refresh to update to the latest sales."
+      : historical
+        ? "Historical period — these numbers are final."
+        : stale
+          ? override
+            ? `Last synced ${lastSyncedLabel}.`
+            : `New sales may have come in — last synced ${lastSyncedLabel}. Click Refresh.`
+          : `Up to date — last synced ${lastSyncedLabel}.`;
 
   const refresh = () => {
     setRefreshRequested(true);
-    fetcher.submit(
-      { intent: "refresh", start: range.start, end: range.end },
-      { method: "post" },
-    );
+    fetcher.submit({ intent: "refresh" }, { method: "post" });
   };
 
   return (
@@ -902,7 +910,7 @@ export default function Analytics() {
           ) : (
             <s-box padding="base">
               <s-paragraph>
-                No data for this range yet — click Refresh above to pull it.
+                No sales recorded for this selection.
               </s-paragraph>
             </s-box>
           )}

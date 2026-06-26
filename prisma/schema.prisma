@@ -105,12 +105,18 @@ model SalesLine {
 // Progress per sync job (id = `${shop}:${key}`), so long backfills are
 // resumable and the UI can show what happened.
 model SyncState {
-  id        String   @id
+  id        String    @id
   shop      String
-  status    String   @default("idle") // idle | running | done | error
+  status    String    @default("idle") // idle | running | done | error
   progress  String?
   error     String?
-  updatedAt DateTime @updatedAt
+  // High-water mark for the incremental sync: the instant the last *successful*
+  // pull completed. Set only on success (so a failure can't advance it), and
+  // advanced even on a no-op refresh that found zero changed orders — which is
+  // why freshness and resolveIncrementalSince both read it instead of
+  // max(SalesLine.syncedAt) (that only moves when rows are actually written).
+  watermark DateTime?
+  updatedAt DateTime  @updatedAt
 }
 
 // Configurable SKU naming rules; a SKU is "clean" iff every enabled rule passes.
