@@ -863,7 +863,7 @@ export default function Analytics() {
               ).map(([key, label]) => (
                 <s-button
                   key={key}
-                  variant={weeklyTab === key ? "primary" : "tertiary"}
+                  variant={weeklyTab === key ? "secondary" : "tertiary"}
                   onClick={() => setWeeklyTab(key)}
                 >
                   {label}
