@@ -853,7 +853,7 @@ export default function Analytics() {
         // in its own view so the width never jumps between stacked tables.
         <s-section accessibilityLabel="Weekly report" padding="none">
           <s-box padding="base">
-            <s-button-group gap="none">
+            <s-stack direction="inline" gap="small-200">
               {(
                 [
                   ["channel", "Channel"],
@@ -863,14 +863,13 @@ export default function Analytics() {
               ).map(([key, label]) => (
                 <s-button
                   key={key}
-                  slot="secondary-actions"
                   variant={weeklyTab === key ? "primary" : "tertiary"}
                   onClick={() => setWeeklyTab(key)}
                 >
                   {label}
                 </s-button>
               ))}
-            </s-button-group>
+            </s-stack>
           </s-box>
           {weeklyTab === "channel" ? (
             <ChannelBlock report={weekly} />
