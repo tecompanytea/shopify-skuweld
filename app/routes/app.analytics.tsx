@@ -248,6 +248,8 @@ function dollars(cents: number): string {
   return (cents / 100).toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   });
 }
 
@@ -258,7 +260,7 @@ function PairCells({ pair }: { pair: CellPair }) {
   } else {
     const pct = ((pair.ty - pair.ly) / Math.abs(pair.ly)) * 100;
     change = {
-      label: `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`,
+      label: `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}%`,
       tone: pct > 0 ? "success" : pct < 0 ? "critical" : "neutral",
     };
   }
@@ -477,7 +479,7 @@ function Top10Block({ report }: { report: Top10Report }) {
                   <s-table-cell>{category.category}</s-table-cell>
                   <PairCells pair={{ ty: category.ty, ly: category.ly }} />
                   <s-table-cell>
-                    {`${(category.tyPenetration * 100).toFixed(1)}%`}
+                    {`${(category.tyPenetration * 100).toFixed(0)}%`}
                   </s-table-cell>
                 </s-table-row>
               ))}
