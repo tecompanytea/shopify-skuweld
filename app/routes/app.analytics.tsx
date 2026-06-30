@@ -654,6 +654,12 @@ export default function Analytics() {
   const starting = fetcher.state !== "idle";
   const busy = starting || sync.running;
 
+  // Don't let a stale page export un-synced numbers: pause Export until a
+  // Refresh clears the stale state, so a downloaded file can never contain
+  // numbers the screen is already warning are out of date. Historical ranges
+  // aren't stale, and dev override can't sync, so neither is ever blocked.
+  const staleBlocksExport = stale && !override;
+
   // SyncState's done/error rows persist across page loads, so only show this
   // run's result/stall banners after the user actually hit Refresh.
   const [refreshRequested, setRefreshRequested] = useState(false);
@@ -794,7 +800,7 @@ export default function Analytics() {
               View
             </s-button>
             <s-button
-              disabled={exporting || lineCount === 0}
+              disabled={exporting || lineCount === 0 || staleBlocksExport}
               loading={exporting}
               onClick={() => void exportXlsx()}
             >
@@ -802,7 +808,7 @@ export default function Analytics() {
             </s-button>
             <s-button
               variant="secondary"
-              disabled={exporting || lineCount === 0}
+              disabled={exporting || lineCount === 0 || staleBlocksExport}
               onClick={() => void exportXlsx("all")}
             >
               Export all reports
@@ -830,6 +836,12 @@ export default function Analytics() {
             <s-text tone="critical">{freshnessText}</s-text>
           ) : (
             <s-text color="subdued">{freshnessText}</s-text>
+          )}
+          {staleBlocksExport && (
+            <s-text color="subdued">
+              Export is paused until you refresh, so a downloaded file cannot
+              contain stale numbers.
+            </s-text>
           )}
           {busy && (
             <s-stack direction="inline" gap="small-200" alignItems="center">
