@@ -11,6 +11,57 @@ const MONEY = "#,##0.00";
 const PCT = "0.0%";
 const PCT0 = "0%"; // Distribution mix is whole-percent, like the manual sheet
 
+// "All borders" (dotted hairline) for boxed table blocks, applied per cell.
+const ALL_BORDERS: Partial<ExcelJS.Borders> = {
+  top: { style: "dotted" },
+  left: { style: "dotted" },
+  bottom: { style: "dotted" },
+  right: { style: "dotted" },
+};
+
+// Draws a medium-weight outside border around a cell range, preserving any
+// existing (e.g. thin) borders on the interior edges of the perimeter cells.
+function outsideBox(
+  sheet: ExcelJS.Worksheet,
+  top: number,
+  bottom: number,
+  left: number,
+  right: number,
+): void {
+  const edge = { style: "medium" } as const;
+  for (let r = top; r <= bottom; r += 1) {
+    for (let c = left; c <= right; c += 1) {
+      const cell = sheet.getRow(r).getCell(c);
+      cell.border = {
+        ...cell.border,
+        ...(r === top ? { top: edge } : {}),
+        ...(r === bottom ? { bottom: edge } : {}),
+        ...(c === left ? { left: edge } : {}),
+        ...(c === right ? { right: edge } : {}),
+      };
+    }
+  }
+}
+
+// Lays a weighted horizontal rule between two adjacent rows across the given
+// columns, setting both coincident edges and preserving each cell's other
+// (e.g. thin) borders.
+function horizontalRule(
+  sheet: ExcelJS.Worksheet,
+  upperRow: number,
+  lowerRow: number,
+  cols: number[],
+  style: "medium" | "thick",
+): void {
+  const edge = { style };
+  for (const c of cols) {
+    const upper = sheet.getRow(upperRow).getCell(c);
+    upper.border = { ...upper.border, bottom: edge };
+    const lower = sheet.getRow(lowerRow).getCell(c);
+    lower.border = { ...lower.border, top: edge };
+  }
+}
+
 function pct(ty: number, ly: number): number | string {
   if (ly === 0) return ty === 0 ? "—" : "New";
   return (ty - ly) / Math.abs(ly);
@@ -35,22 +86,36 @@ function writeWeeklySheet(
   title = "Report",
 ): void {
   const sheet = workbook.addWorksheet(title);
+  sheet.views = [{ showGridLines: false }]; // white background; only drawn borders show
   sheet.getColumn(1).width = 26;
+  // Money tables (B–M) and the Distribution percentages (P–T) center their
+  // headers and numbers; the label columns (A, O) and the gap (N) stay default.
   for (const c of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
     sheet.getColumn(c).width = 12;
+    sheet.getColumn(c).alignment = { horizontal: "center" };
   }
   sheet.getColumn(14).width = 3; // gap between By Category and Distribution
   sheet.getColumn(15).width = 22; // Distribution row labels
-  for (const c of [16, 17, 18, 19, 20]) sheet.getColumn(c).width = 8;
+  for (const c of [16, 17, 18, 19, 20]) {
+    sheet.getColumn(c).width = 8;
+    sheet.getColumn(c).alignment = { horizontal: "center" };
+  }
 
   sheet.addRow(["Té Company Weekly Report"]).font = { bold: true, size: 14 };
-  sheet.addRow([
+  // Leave C2 untouched (no "" spacer) so the date in B2 can spill into it,
+  // matching B3. Labels stack in column A (A2 / A3); dates sit in column B.
+  const dateRow = sheet.addRow([
     "Date range",
     `${report.range.start} to ${report.range.end}`,
-    "",
+  ]);
+  const lyDateRow = sheet.addRow([
     "LY (weekday-aligned)",
     `${report.lyRange.start} to ${report.lyRange.end}`,
   ]);
+  // Column B is centered for the tables below; keep the date values
+  // left-aligned (left-aligned B2 also preserves its spill into C2).
+  dateRow.getCell(2).alignment = { horizontal: "left" };
+  lyDateRow.getCell(2).alignment = { horizontal: "left" };
   sheet.addRow([]);
 
   const channelHeader = sheet.addRow(["BY CHANNEL", "TY", "LY", "% to LY"]);
@@ -89,6 +154,10 @@ function writeWeeklySheet(
     moneyCell(row, 2, pair.ty);
     moneyCell(row, 3, pair.ly);
     pctCell(row, 4, pair.ty, pair.ly);
+    // All-borders box around the four channel rows (A–D); TOTAL rows excluded.
+    if (!label.startsWith("TOTAL")) {
+      for (let c = 1; c <= 4; c += 1) row.getCell(c).border = ALL_BORDERS;
+    }
   }
   sheet.addRow([]);
 
@@ -176,6 +245,12 @@ function writeWeeklySheet(
     if (bold) row.font = { bold: true };
     catCells(row, label, c);
     distCells(row, label, c);
+    // Box each data row across the By Category (A–M) and Distribution (O–T)
+    // tables; column N is the gap between them, left unboxed.
+    for (let col = 1; col <= 20; col += 1) {
+      if (col !== 14) row.getCell(col).border = ALL_BORDERS;
+    }
+    return row;
   };
 
   // A grand-total line. By Category always shows the dollar total. The
@@ -186,9 +261,18 @@ function writeWeeklySheet(
     row.font = { bold: true };
     catCells(row, "TOTAL", grand);
     if (withDist) distCells(row, "TOTAL", grand);
+    return row;
   };
 
-  for (const c of report.categories) dataRow(c.row.key, c);
+  let firstServiceRow = 0;
+  let lastServiceRow = 0;
+  for (const c of report.categories) {
+    const row = dataRow(c.row.key, c);
+    if (c.row.section === "service") {
+      if (firstServiceRow === 0) firstServiceRow = row.number;
+      lastServiceRow = row.number;
+    }
+  }
   totalRow();
   sheet.addRow([]);
   dataRow("Total Retail", report.sections.retail, true);
@@ -197,7 +281,45 @@ function writeWeeklySheet(
   totalRow(true);
   sheet.addRow([]);
   for (const g of report.groups) dataRow(`TTL ${g.group}`, g, true);
-  totalRow(true);
+  const lastTotal = totalRow(true);
+
+  // Medium-weight outside box around the By Category totals (TOTAL TY /
+  // TOTAL LY / % to LY), from the BY CATEGORY header (row 14) down to the
+  // final groups total (row 36 today) — anchored to the rows so it never drifts.
+  outsideBox(sheet, catHeader.number, lastTotal.number, 2, 4);
+
+  // Medium rules bracketing the Service section (rows 20–22 today) across the
+  // By Category (A–M) and Distribution (O–T) tables — anchored to the section.
+  if (firstServiceRow > 0) {
+    const tableCols = Array.from({ length: 20 }, (_, i) => i + 1).filter(
+      (col) => col !== 14,
+    );
+    horizontalRule(sheet, firstServiceRow - 1, firstServiceRow, tableCols, "medium");
+    horizontalRule(sheet, lastServiceRow, lastServiceRow + 1, tableCols, "medium");
+  }
+
+  // Weekly meeting report shows whole dollars and whole percents (no decimals).
+  sheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      if (cell.numFmt === MONEY) cell.numFmt = "#,##0";
+      else if (cell.numFmt === PCT) cell.numFmt = PCT0;
+    });
+  });
+
+  // Peach highlight on the BY CATEGORY % change columns (% to LY, WV %, EV %,
+  // Web %), from the header (row 14) to the final total (36). Blank separator
+  // rows (empty column A) are skipped, so the band breaks into three blocks.
+  const pctFill: ExcelJS.Fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFBE2D5" },
+  };
+  for (let r = catHeader.number; r <= lastTotal.number; r += 1) {
+    if (!sheet.getRow(r).getCell(1).value) continue; // skip blank separator rows
+    for (const col of [4, 7, 10, 13]) {
+      sheet.getRow(r).getCell(col).fill = pctFill;
+    }
+  }
 }
 
 export async function buildWeeklyWorkbook(
