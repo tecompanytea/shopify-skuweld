@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 
 import {
   PERIOD_PRESET_GROUPS,
+  formatDay,
   presetLabel,
   rangeForPreset,
   shiftDay,
@@ -25,15 +26,6 @@ function addMonths(month: string, delta: number): string {
   return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
 }
 
-function formatDay(day: string): string {
-  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
 // Left calendar month for a range: the range's start month, except when the
 // whole range sits in the current month — then current month goes on the
 // right calendar (matching the admin picker).
@@ -45,7 +37,7 @@ function leftViewFor(range: DayRange, today: string): string {
   return startMonth;
 }
 
-function QuickPick({
+export function QuickPick({
   selected,
   onClick,
   children,
@@ -104,7 +96,9 @@ export function PeriodPicker({
     setStartText(nextStart);
     setEndText(nextEnd);
     if (nextStart) {
-      setView(leftViewFor({ start: nextStart, end: nextEnd || nextStart }, today));
+      setView(
+        leftViewFor({ start: nextStart, end: nextEnd || nextStart }, today),
+      );
     }
   };
 
@@ -153,7 +147,8 @@ export function PeriodPicker({
   const calendarValue = end ? `${start}--${end}` : start ? `${start}--` : "";
   const disallowFuture = `${shiftDay(today, 1)}--`;
   const triggerLabel =
-    presetLabel(preset) ?? `${formatDay(range.start)} – ${formatDay(range.end)}`;
+    presetLabel(preset) ??
+    `${formatDay(range.start)} – ${formatDay(range.end)}`;
 
   return (
     <>
@@ -198,7 +193,12 @@ export function PeriodPicker({
 
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div
-              style={{ display: "flex", gap: 8, alignItems: "center", padding: 12 }}
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                padding: 12,
+              }}
             >
               <s-text-field
                 label="Starting"
@@ -217,7 +217,9 @@ export function PeriodPicker({
                 placeholder="YYYY-MM-DD"
                 value={endText}
                 onInput={(event) => setEndText(event.currentTarget.value)}
-                onChange={(event) => commitField("end", event.currentTarget.value)}
+                onChange={(event) =>
+                  commitField("end", event.currentTarget.value)
+                }
               />
             </div>
             <div style={{ display: "flex", gap: 12, padding: "0 12px 12px" }}>
@@ -226,8 +228,12 @@ export function PeriodPicker({
                 value={calendarValue}
                 view={view}
                 disallow={disallowFuture}
-                onInput={(event) => handleCalendarValue(event.currentTarget.value)}
-                onChange={(event) => handleCalendarValue(event.currentTarget.value)}
+                onInput={(event) =>
+                  handleCalendarValue(event.currentTarget.value)
+                }
+                onChange={(event) =>
+                  handleCalendarValue(event.currentTarget.value)
+                }
                 onViewChange={(event) => {
                   const next = event.currentTarget.view;
                   if (next !== view) setView(next);
@@ -238,8 +244,12 @@ export function PeriodPicker({
                 value={calendarValue}
                 view={addMonths(view, 1)}
                 disallow={disallowFuture}
-                onInput={(event) => handleCalendarValue(event.currentTarget.value)}
-                onChange={(event) => handleCalendarValue(event.currentTarget.value)}
+                onInput={(event) =>
+                  handleCalendarValue(event.currentTarget.value)
+                }
+                onChange={(event) =>
+                  handleCalendarValue(event.currentTarget.value)
+                }
                 onViewChange={(event) => {
                   const next = addMonths(event.currentTarget.view, -1);
                   if (next !== view) setView(next);
@@ -255,7 +265,11 @@ export function PeriodPicker({
                 padding: 12,
               }}
             >
-              <s-button commandFor={POPOVER_ID} command="--hide" onClick={cancel}>
+              <s-button
+                commandFor={POPOVER_ID}
+                command="--hide"
+                onClick={cancel}
+              >
                 Cancel
               </s-button>
               <s-button

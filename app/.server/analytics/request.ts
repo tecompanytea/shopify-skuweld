@@ -1,4 +1,10 @@
-import { toReportDay, rangeForPreset, type DayRange } from "../../lib/periods";
+import {
+  COMPARISON_OPTIONS,
+  toReportDay,
+  rangeForPreset,
+  type ComparisonMode,
+  type DayRange,
+} from "../../lib/periods";
 
 // Shared request-level helpers for the analytics routes.
 
@@ -38,4 +44,17 @@ export function resolveRange(params: URLSearchParams): DayRange {
     return defaultRange();
   }
   return rangeForPreset(preset, toReportDay(new Date())) ?? defaultRange();
+}
+
+// Comparison window for the LY columns. An explicit ?compare= wins; otherwise
+// each report keeps its historical default: product selling compares calendar
+// dates ("May vs last May"), everything else weekday-aligns (Mon..Sun).
+export function resolveComparison(
+  params: URLSearchParams,
+  type: string,
+): ComparisonMode {
+  const value = params.get("compare");
+  const match = COMPARISON_OPTIONS.find((option) => option.value === value);
+  if (match) return match.value;
+  return type.startsWith("product-") ? "previous-year" : "previous-year-dow";
 }

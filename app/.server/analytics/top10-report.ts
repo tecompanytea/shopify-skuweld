@@ -1,6 +1,10 @@
 import prisma from "../../db.server";
 import { CATEGORY_ROWS } from "./categories";
-import { weekdayAlignedLastYear, type DayRange } from "../../lib/periods";
+import {
+  comparisonRange,
+  type ComparisonMode,
+  type DayRange,
+} from "../../lib/periods";
 
 // Category Top10 weekly report: per channel (stores, web, total), net sales
 // by category TY vs weekday-aligned LY with penetration %, plus the top
@@ -34,6 +38,7 @@ export interface ChannelTop10 {
 export interface Top10Report {
   range: DayRange;
   lyRange: DayRange;
+  compare: ComparisonMode;
   channels: ChannelTop10[];
 }
 
@@ -63,8 +68,9 @@ const TOP_N = 10;
 export async function computeTop10Report(
   shop: string,
   range: DayRange,
+  compare: ComparisonMode,
 ): Promise<Top10Report> {
-  const lyRange = weekdayAlignedLastYear(range);
+  const lyRange = comparisonRange(compare, range);
 
   // No category filter in SQL: `NOT category = X` would silently drop
   // NULL-category rows (untyped/deleted products). Square gift cards are
@@ -184,6 +190,7 @@ export async function computeTop10Report(
   return {
     range,
     lyRange,
+    compare,
     channels: order
       .filter((channel) => channels.has(channel))
       .map((channel) => {

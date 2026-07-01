@@ -21,6 +21,7 @@ import { runInBackground } from "../.server/analytics/background";
 import {
   analyticsShopOverride,
   resolveAnalyticsShop,
+  resolveComparison,
   resolveRange,
 } from "../.server/analytics/request";
 import { evaluateFreshness } from "../.server/analytics/freshness";
@@ -45,6 +46,7 @@ import {
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 import { toReportDay } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
+import { ComparisonPicker } from "../components/comparison-picker";
 
 // Human "last refreshed" label for the freshness line under the report.
 function refreshedLabel(at: Date, now: number): string {
@@ -124,6 +126,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const type = url.searchParams.get("type") ?? "weekly";
   const preset = url.searchParams.get("preset") ?? "last-week";
   const range = resolveRange(url.searchParams);
+  const compare = resolveComparison(url.searchParams, type);
 
   const [syncStates, lineCount] = await Promise.all([
     prisma.syncState.findMany({ where: { shop } }),
@@ -137,7 +140,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     range,
     now,
   );
-  const lastSyncedLabel = lastSyncedAt ? refreshedLabel(lastSyncedAt, now) : null;
+  const lastSyncedLabel = lastSyncedAt
+    ? refreshedLabel(lastSyncedAt, now)
+    : null;
   const sync = summarizeSync(shop, syncStates, now);
 
   let weekly: WeeklyReport | null = null;
@@ -146,15 +151,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let unitsBySize: UnitsBySizeReport | null = null;
   if (lineCount > 0) {
     if (type === "weekly") {
-      weekly = await computeWeeklyReport(shop, range);
+      weekly = await computeWeeklyReport(shop, range, compare);
     } else if (type.startsWith("product-")) {
       productSelling = await computeProductSellingReport(
         shop,
         type.slice("product-".length),
         range,
+        compare,
       );
     } else if (type === "top10") {
-      top10 = await computeTop10Report(shop, range);
+      top10 = await computeTop10Report(shop, range, compare);
     } else if (type === "units-by-size") {
       unitsBySize = await computeUnitsBySizeReport(shop, range);
     }
@@ -164,6 +170,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     type,
     preset,
     range,
+    compare,
     sync,
     lineCount,
     stale,
@@ -231,7 +238,10 @@ function dollars(cents: number): string {
 }
 
 function PairCells({ pair }: { pair: CellPair }) {
-  let change: { label: string; tone: "success" | "critical" | "neutral" } | null;
+  let change: {
+    label: string;
+    tone: "success" | "critical" | "neutral";
+  } | null;
   if (pair.ly === 0) {
     change = pair.ty === 0 ? null : { label: "New", tone: "success" };
   } else {
@@ -246,11 +256,7 @@ function PairCells({ pair }: { pair: CellPair }) {
       <s-table-cell>{dollars(pair.ty)}</s-table-cell>
       <s-table-cell>{dollars(pair.ly)}</s-table-cell>
       <s-table-cell>
-        {change ? (
-          <s-badge tone={change.tone}>{change.label}</s-badge>
-        ) : (
-          "—"
-        )}
+        {change ? <s-badge tone={change.tone}>{change.label}</s-badge> : "—"}
       </s-table-cell>
     </>
   );
@@ -268,8 +274,16 @@ function ChannelBlock({ report }: { report: WeeklyReport }) {
       ly: channels.wv.ly + channels.ev.ly + channels.invoiced.ly,
     },
     all: {
-      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty + channels.invoiced.ty,
-      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly + channels.invoiced.ly,
+      ty:
+        channels.wv.ty +
+        channels.ev.ty +
+        channels.ecom.ty +
+        channels.invoiced.ty,
+      ly:
+        channels.wv.ly +
+        channels.ev.ly +
+        channels.ecom.ly +
+        channels.invoiced.ly,
     },
   };
   const rows: Array<[string, CellPair]> = [
@@ -329,8 +343,10 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
   // excluded — it isn't categorized).
   const grand: ChannelCells = {
     total: {
-      ty: report.channels.wv.ty + report.channels.ev.ty + report.channels.ecom.ty,
-      ly: report.channels.wv.ly + report.channels.ev.ly + report.channels.ecom.ly,
+      ty:
+        report.channels.wv.ty + report.channels.ev.ty + report.channels.ecom.ty,
+      ly:
+        report.channels.wv.ly + report.channels.ev.ly + report.channels.ecom.ly,
     },
     wv: report.channels.wv,
     ev: report.channels.ev,
@@ -440,7 +456,9 @@ function Top10Block({ report }: { report: Top10Report }) {
       {report.channels.map((channel) => (
         <s-stack key={channel.channel} direction="block" gap="base">
           <s-box padding="base">
-            <s-heading>{channelLabel[channel.channel] ?? channel.channel}</s-heading>
+            <s-heading>
+              {channelLabel[channel.channel] ?? channel.channel}
+            </s-heading>
           </s-box>
           <s-table>
             <s-table-header-row>
@@ -462,7 +480,9 @@ function Top10Block({ report }: { report: Top10Report }) {
               ))}
               <s-table-row>
                 <s-table-cell>TOTAL</s-table-cell>
-                <PairCells pair={{ ty: channel.totalTy, ly: channel.totalLy }} />
+                <PairCells
+                  pair={{ ty: channel.totalTy, ly: channel.totalLy }}
+                />
                 <s-table-cell>100%</s-table-cell>
               </s-table-row>
             </s-table-body>
@@ -544,9 +564,7 @@ function ProductSellingBlock({ report }: { report: ProductSellingReport }) {
                 ? ([["E-commerce", report.channelTotals.ECOM]] as const)
                 : []),
               ["ALL CHANNELS", report.channelTotals.ALL],
-            ] as Array<
-              [string, { ty: { net: number }; ly: { net: number } }]
-            >
+            ] as Array<[string, { ty: { net: number }; ly: { net: number } }]>
           ).map(([label, totals]) => (
             <s-table-row key={label}>
               <s-table-cell>{label}</s-table-cell>
@@ -609,6 +627,7 @@ export default function Analytics() {
     type,
     preset,
     range,
+    compare,
     sync,
     lineCount,
     stale,
@@ -620,7 +639,7 @@ export default function Analytics() {
     top10,
     unitsBySize,
   } = useLoaderData<typeof loader>();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
   const revalidator = useRevalidator();
 
@@ -658,18 +677,21 @@ export default function Analytics() {
   const actionError =
     fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
 
-  const [pickedType, setPickedType] = useState(type);
   const [exporting, setExporting] = useState(false);
   const [weeklyTab, setWeeklyTab] = useState<
     "channel" | "category" | "distribution"
   >("channel");
 
   const currentParams = () => {
-    const params: Record<string, string> = { type: pickedType, preset };
+    const params: Record<string, string> = { type, preset };
     if (preset === "custom") {
       params.start = range.start;
       params.end = range.end;
     }
+    // Only pin ?compare= once the user explicitly picked one; otherwise each
+    // report type keeps its own default comparison.
+    const compareParam = searchParams.get("compare");
+    if (compareParam) params.compare = compareParam;
     return params;
   };
 
@@ -711,11 +733,9 @@ export default function Analytics() {
         ? "Category Top 10"
         : type === "units-by-size"
           ? "Loose Leaf — Units by size"
-          : (productSelling
-              ? `Product selling — ${productSelling.scope.label}`
-              : "Report");
-  const lyRange = weekly?.lyRange ?? productSelling?.lyRange ?? top10?.lyRange ?? null;
-
+          : productSelling
+            ? `Product selling — ${productSelling.scope.label}`
+            : "Report";
   const freshnessText =
     lastSyncedLabel === null
       ? lineCount === 0
@@ -739,21 +759,96 @@ export default function Analytics() {
   };
 
   return (
-    <s-page heading="Analytics">
+    <s-page
+      heading="Analytics"
+      // subheading renders as title metadata ("Last synced …") but is missing
+      // from polaris-types' React props (present in the runtime and base types).
+      {...(lastSyncedLabel
+        ? { subheading: `Last synced ${lastSyncedLabel}` }
+        : {})}
+    >
+      {/* Title-bar actions are re-rendered by the admin host from a small
+          {label, icon, disabled} payload — labeled buttons render natively,
+          icon-only ones don't, and only variant "secondary"/"auto" is allowed
+          in this slot. */}
+      <s-button
+        slot="secondary-actions"
+        disabled={Boolean(override) || busy || !stale}
+        loading={busy}
+        onClick={refresh}
+      >
+        Refresh
+      </s-button>
+      <s-button
+        slot="secondary-actions"
+        disabled={exporting || lineCount === 0 || staleBlocksExport}
+        loading={exporting}
+        onClick={() => void exportXlsx()}
+      >
+        Export .xlsx
+      </s-button>
+      <s-button slot="secondary-actions" commandFor="analytics-more-actions">
+        More actions
+      </s-button>
+      <s-menu id="analytics-more-actions" accessibilityLabel="More actions">
+        <s-button
+          disabled={exporting || lineCount === 0 || staleBlocksExport}
+          onClick={() => void exportXlsx("all")}
+        >
+          Export all reports
+        </s-button>
+      </s-menu>
       {override && (
         <s-banner tone="info">
           {`Reading data for ${override} (ANALYTICS_SHOP_OVERRIDE) — syncs disabled.`}
         </s-banner>
       )}
 
-      <s-section heading="Report" accessibilityLabel="Report picker">
+      {/* Native-analytics-style data controls: date range + comparison float
+          bare under the title bar (like native analytics); the report picker
+          and freshness/sync status live in the card below. Everything applies
+          immediately (navigates) — there is no staged View. */}
+      <s-box paddingBlockEnd="base">
+        <s-stack direction="inline" gap="small" alignItems="end">
+          <PeriodPicker
+            preset={preset}
+            range={range}
+            onApply={(nextPreset, nextRange) => {
+              const params = currentParams();
+              params.preset = nextPreset;
+              delete params.start;
+              delete params.end;
+              if (nextPreset === "custom") {
+                params.start = nextRange.start;
+                params.end = nextRange.end;
+              }
+              setSearchParams(params);
+            }}
+          />
+          {type !== "units-by-size" && (
+            <ComparisonPicker
+              compare={compare}
+              range={range}
+              onSelect={(mode) =>
+                setSearchParams({ ...currentParams(), compare: mode })
+              }
+            />
+          )}
+        </s-stack>
+      </s-box>
+
+      <s-section accessibilityLabel="Report controls">
         <s-stack direction="block" gap="base">
           <s-stack direction="inline" gap="small" alignItems="end">
             <s-select
               label="Report type"
-              value={pickedType}
+              labelAccessibilityVisibility="exclusive"
+              value={type}
               onChange={(event) =>
-                setPickedType((event.target as HTMLSelectElement).value)
+                setSearchParams({
+                  ...currentParams(),
+                  type: (event.target as HTMLSelectElement).value,
+                })
               }
             >
               <s-option value="weekly">Weekly meeting report</s-option>
@@ -767,60 +862,7 @@ export default function Analytics() {
                 Loose Leaf — Units by size
               </s-option>
             </s-select>
-            <PeriodPicker
-              preset={preset}
-              range={range}
-              onApply={(nextPreset, nextRange) => {
-                const params: Record<string, string> = {
-                  type: pickedType,
-                  preset: nextPreset,
-                };
-                if (nextPreset === "custom") {
-                  params.start = nextRange.start;
-                  params.end = nextRange.end;
-                }
-                setSearchParams(params);
-              }}
-            />
-            <s-button
-              variant="primary"
-              onClick={() => setSearchParams(currentParams())}
-            >
-              View
-            </s-button>
-            <s-button
-              disabled={exporting || lineCount === 0 || staleBlocksExport}
-              loading={exporting}
-              onClick={() => void exportXlsx()}
-            >
-              Export .xlsx
-            </s-button>
-            <s-button
-              variant="secondary"
-              disabled={exporting || lineCount === 0 || staleBlocksExport}
-              onClick={() => void exportXlsx("all")}
-            >
-              Export all reports
-            </s-button>
-            <s-button
-              icon="refresh"
-              variant={stale ? "primary" : "secondary"}
-              disabled={Boolean(override) || busy || !stale}
-              loading={busy}
-              onClick={refresh}
-            >
-              Refresh
-            </s-button>
           </s-stack>
-          <s-text color="subdued">
-            {`Showing ${range.start} → ${range.end}${
-              lyRange
-                ? ` · compared to ${lyRange.start} → ${lyRange.end}${
-                    type === "weekly" ? " (weekday-aligned)" : " (calendar LY)"
-                  }`
-                : ""
-            }`}
-          </s-text>
           {stale ? (
             <s-text tone="critical">{freshnessText}</s-text>
           ) : (
@@ -847,15 +889,22 @@ export default function Analytics() {
               to resume (already-pulled data is kept).
             </s-banner>
           )}
-          {refreshRequested && !busy && !sync.stalled && sync.results.length > 0 && (
-            <s-banner
-              tone={sync.results.every((result) => result.ok) ? "success" : "critical"}
-            >
-              {sync.results
-                .map((result) => `${result.source}: ${result.message}`)
-                .join(" · ")}
-            </s-banner>
-          )}
+          {refreshRequested &&
+            !busy &&
+            !sync.stalled &&
+            sync.results.length > 0 && (
+              <s-banner
+                tone={
+                  sync.results.every((result) => result.ok)
+                    ? "success"
+                    : "critical"
+                }
+              >
+                {sync.results
+                  .map((result) => `${result.source}: ${result.message}`)
+                  .join(" · ")}
+              </s-banner>
+            )}
         </s-stack>
       </s-section>
 
@@ -913,9 +962,7 @@ export default function Analytics() {
             <UnitsBySizeBlock report={unitsBySize} />
           ) : (
             <s-box padding="base">
-              <s-paragraph>
-                No sales recorded for this selection.
-              </s-paragraph>
+              <s-paragraph>No sales recorded for this selection.</s-paragraph>
             </s-box>
           )}
         </TableCard>

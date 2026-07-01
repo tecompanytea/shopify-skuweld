@@ -1,6 +1,10 @@
 import prisma from "../../db.server";
 import { CATEGORY_ROWS, type CategoryRow } from "./categories";
-import { weekdayAlignedLastYear, type DayRange } from "../../lib/periods";
+import {
+  comparisonRange,
+  type ComparisonMode,
+  type DayRange,
+} from "../../lib/periods";
 
 // Computes the Weekly Meeting Report: net sales by channel and by category,
 // this-year vs weekday-aligned last-year. Reproduces the manual template:
@@ -30,6 +34,7 @@ export interface CategoryReportRow extends ChannelCells {
 export interface WeeklyReport {
   range: DayRange;
   lyRange: DayRange;
+  compare: ComparisonMode;
   channels: {
     wv: CellPair;
     ev: CellPair;
@@ -105,8 +110,9 @@ function sumChannelCells(rows: ChannelCells[]): ChannelCells {
 export async function computeWeeklyReport(
   shop: string,
   range: DayRange,
+  compare: ComparisonMode,
 ): Promise<WeeklyReport> {
-  const lyRange = weekdayAlignedLastYear(range);
+  const lyRange = comparisonRange(compare, range);
   const [ty, ly] = await Promise.all([
     sumRange(shop, range),
     sumRange(shop, lyRange),
@@ -158,6 +164,7 @@ export async function computeWeeklyReport(
   return {
     range,
     lyRange,
+    compare,
     channels: {
       wv: grand.wv,
       ev: grand.ev,

@@ -5,6 +5,7 @@ import prisma from "../db.server";
 import {
   analyticsShopOverride,
   resolveAnalyticsShop,
+  resolveComparison,
   resolveRange,
 } from "../.server/analytics/request";
 import { evaluateFreshness } from "../.server/analytics/freshness";
@@ -34,27 +35,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const syncStates = await prisma.syncState.findMany({ where: { shop } });
   const { stale } = evaluateFreshness(shop, syncStates, range, Date.now());
   if (stale && !override) {
-    throw new Response("Report data is stale. Click Refresh before exporting.", {
-      status: 409,
-    });
+    throw new Response(
+      "Report data is stale. Click Refresh before exporting.",
+      {
+        status: 409,
+      },
+    );
   }
 
   let buffer: Buffer;
   let filename: string;
   if (type === "weekly") {
-    const report = await computeWeeklyReport(shop, range);
+    const compare = resolveComparison(url.searchParams, type);
+    const report = await computeWeeklyReport(shop, range, compare);
     buffer = await buildWeeklyWorkbook(report);
     filename = `Weekly Report ${range.start} - ${range.end}.xlsx`;
   } else if (type.startsWith("product-")) {
+    const compare = resolveComparison(url.searchParams, type);
     const report = await computeProductSellingReport(
       shop,
       type.slice("product-".length),
       range,
+      compare,
     );
     buffer = await buildProductSellingWorkbook(report);
     filename = `Product Selling ${report.scope.label} ${range.start} - ${range.end}.xlsx`;
   } else if (type === "top10") {
-    const report = await computeTop10Report(shop, range);
+    const compare = resolveComparison(url.searchParams, type);
+    const report = await computeTop10Report(shop, range, compare);
     buffer = await buildTop10Workbook(report);
     filename = `Category Top10 ${range.start} - ${range.end}.xlsx`;
   } else if (type === "units-by-size") {
@@ -62,12 +70,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     buffer = await buildUnitsBySizeWorkbook(report);
     filename = `Loose Leaf Units by Size ${range.start} - ${range.end}.xlsx`;
   } else if (type === "all") {
-    const weekly = await computeWeeklyReport(shop, range);
+    // Per-report comparison: an explicit ?compare= applies everywhere, else
+    // each report keeps its own default.
+    const weekly = await computeWeeklyReport(
+      shop,
+      range,
+      resolveComparison(url.searchParams, "weekly"),
+    );
     const products = [];
     for (const scope of PRODUCT_REPORT_SCOPES) {
-      products.push(await computeProductSellingReport(shop, scope.key, range));
+      products.push(
+        await computeProductSellingReport(
+          shop,
+          scope.key,
+          range,
+          resolveComparison(url.searchParams, `product-${scope.key}`),
+        ),
+      );
     }
-    const top10 = await computeTop10Report(shop, range);
+    const top10 = await computeTop10Report(
+      shop,
+      range,
+      resolveComparison(url.searchParams, "top10"),
+    );
     const units = await computeUnitsBySizeReport(shop, range);
     buffer = await buildAllReportsWorkbook(weekly, products, top10, units);
     filename = `Te Company Reports ${range.start} - ${range.end}.xlsx`;

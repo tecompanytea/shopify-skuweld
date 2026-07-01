@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { COMPARISON_NOTES } from "../../lib/periods";
 import type { WeeklyReport, CellPair, ChannelCells } from "./weekly-report";
 import type { ProductSellingReport, ProductCell } from "./product-selling-report";
 import { SIZE_COLUMNS, type UnitsBySizeReport } from "./units-by-size-report";
@@ -525,7 +526,7 @@ function writeTop10Sheets(
   summary.getColumn(2).width = 28;
   for (const c of [3, 4, 5, 6]) summary.getColumn(c).width = 12;
   summary.addRow([
-    `Net sales by category · ${report.range.start} → ${report.range.end} vs ${report.lyRange.start} → ${report.lyRange.end} (weekday-aligned) · invoiced excluded`,
+    `Net sales by category · ${report.range.start} → ${report.range.end} vs ${report.lyRange.start} → ${report.lyRange.end} (${COMPARISON_NOTES[report.compare]}) · invoiced excluded`,
   ]).font = { bold: true };
   for (const channel of report.channels) {
     summary.addRow([]);

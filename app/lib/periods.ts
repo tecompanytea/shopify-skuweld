@@ -55,11 +55,71 @@ export function calendarLastYear(range: DayRange): DayRange {
   return { start: shift(range.start), end: shift(range.end) };
 }
 
+// The immediately preceding window of the same length ("Previous period"):
+// Jun 22–29 (8 days) → Jun 14–21.
+export function previousPeriod(range: DayRange): DayRange {
+  const days =
+    (parseDay(range.end).getTime() - parseDay(range.start).getTime()) /
+      86_400_000 +
+    1;
+  return {
+    start: shiftDay(range.start, -days),
+    end: shiftDay(range.end, -days),
+  };
+}
+
+// ---- Comparison modes (the "compare to" control) ----
+
+export type ComparisonMode =
+  | "previous-period"
+  | "previous-year"
+  | "previous-year-dow";
+
+export const COMPARISON_OPTIONS: { value: ComparisonMode; label: string }[] = [
+  { value: "previous-period", label: "Previous period" },
+  { value: "previous-year", label: "Previous year" },
+  { value: "previous-year-dow", label: "Previous year (match day of week)" },
+];
+
+export function comparisonRange(
+  mode: ComparisonMode,
+  range: DayRange,
+): DayRange {
+  switch (mode) {
+    case "previous-period":
+      return previousPeriod(range);
+    case "previous-year":
+      return calendarLastYear(range);
+    case "previous-year-dow":
+      return weekdayAlignedLastYear(range);
+  }
+}
+
+// Short parenthetical for report/sheet titles.
+export const COMPARISON_NOTES: Record<ComparisonMode, string> = {
+  "previous-period": "previous period",
+  "previous-year": "calendar LY",
+  "previous-year-dow": "weekday-aligned",
+};
+
+// "Jun 22, 2026" — trigger labels on the date controls.
+export function formatDay(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 // The local-day range covers these UTC instants (for API date filters):
 // from start-day 00:00 ET to the instant after end-day 23:59:59.999 ET.
 // New York offset is -05:00 (EST) or -04:00 (EDT); using the wider bound on
 // each side and bucketing precisely via toReportDay keeps filters correct.
-export function rangeToInstants(range: DayRange): { startAt: Date; endAt: Date } {
+export function rangeToInstants(range: DayRange): {
+  startAt: Date;
+  endAt: Date;
+} {
   const start = parseDay(range.start);
   start.setUTCHours(0, 0, 0, 0);
   start.setUTCHours(start.getUTCHours() + 4); // earliest possible 00:00 ET

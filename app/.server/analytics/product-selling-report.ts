@@ -3,7 +3,11 @@ import {
   PRODUCT_REPORT_SCOPES,
   type ProductReportScope,
 } from "../../lib/analytics-scopes";
-import { calendarLastYear, type DayRange } from "../../lib/periods";
+import {
+  comparisonRange,
+  type ComparisonMode,
+  type DayRange,
+} from "../../lib/periods";
 
 // Product-selling report: every product in one category, net sales + units,
 // TY vs calendar-aligned LY, per channel and combined. Mirrors the manual
@@ -34,6 +38,7 @@ export interface ProductSellingReport {
   scope: ProductReportScope;
   range: DayRange;
   lyRange: DayRange;
+  compare: ComparisonMode;
   rows: ProductRow[];
   channelTotals: Record<
     "WV" | "EV" | "ECOM" | "ALL",
@@ -133,9 +138,10 @@ export async function computeProductSellingReport(
   shop: string,
   scopeKey: string,
   range: DayRange,
+  compare: ComparisonMode,
 ): Promise<ProductSellingReport> {
   const scope = productReportScope(scopeKey);
-  const lyRange = calendarLastYear(range);
+  const lyRange = comparisonRange(compare, range);
   const products = new Map<string, Accumulator>();
   await accumulate(shop, scope, range, "ty", products);
   await accumulate(shop, scope, lyRange, "ly", products);
@@ -183,5 +189,5 @@ export async function computeProductSellingReport(
     }
   }
 
-  return { scope, range, lyRange, rows, channelTotals };
+  return { scope, range, lyRange, compare, rows, channelTotals };
 }
