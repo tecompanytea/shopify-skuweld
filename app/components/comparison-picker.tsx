@@ -25,12 +25,23 @@ export function ComparisonPicker({
   range: DayRange;
   onSelect: (mode: ComparisonMode) => void;
 }) {
-  // hideOverlay exists at runtime (BaseOverlayMethods) but is missing from
-  // polaris-types' generated Popover class.
-  const popover = useRef<ElementRef<"s-popover"> & { hideOverlay(): void }>(
-    null,
-  );
+  const popover = useRef<ElementRef<"s-popover">>(null);
   const lyRange = comparisonRange(compare, range);
+
+  // s-popover has no public close method (hideOverlay lives on the modal
+  // class), so close via its "--hide" command — the same mechanism
+  // commandFor buttons use — with a method call if a future version adds one.
+  const closePopover = () => {
+    const el = popover.current as
+      | (HTMLElement & { hideOverlay?: () => void })
+      | null;
+    if (!el) return;
+    if (typeof el.hideOverlay === "function") el.hideOverlay();
+    else
+      el.dispatchEvent(
+        Object.assign(new Event("command"), { command: "--hide" }),
+      );
+  };
 
   return (
     <>
@@ -56,8 +67,10 @@ export function ComparisonPicker({
               key={option.value}
               selected={option.value === compare}
               onClick={() => {
-                popover.current?.hideOverlay();
+                // Navigate first: closing must never be able to block the
+                // selection from applying.
                 if (option.value !== compare) onSelect(option.value);
+                closePopover();
               }}
             >
               {option.label}
