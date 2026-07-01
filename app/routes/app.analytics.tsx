@@ -18,12 +18,12 @@ import prisma from "../db.server";
 import { syncSquareOrdersIncremental } from "../.server/analytics/square-sync";
 import { syncShopifyOrdersIncremental } from "../.server/analytics/shopify-sync";
 import { runInBackground } from "../.server/analytics/background";
-import { INCREMENTAL_MAX_WINDOW_MS } from "../lib/incremental-window";
 import {
   analyticsShopOverride,
   resolveAnalyticsShop,
   resolveRange,
 } from "../.server/analytics/request";
+import { evaluateFreshness } from "../.server/analytics/freshness";
 import {
   computeWeeklyReport,
   type CellPair,
@@ -130,36 +130,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.salesLine.count({ where: { shop } }),
   ]);
 
-  // Freshness in the incremental model, evaluated PER SOURCE from each source's
-  // watermark (the last successful pull — which advances even on a no-op
-  // refresh) and status. Refresh re-pulls only the recent "live" window;
-  // anything older is immutable, so a report ending before the window is always
-  // current. A live report is "up to date" only if BOTH the Square (in-store)
-  // and Shopify (online) pulls are recent AND healthy — a stale or failed
-  // source must not be masked by the other being fresh.
   const now = Date.now();
-  const liveCutoffDay = toReportDay(new Date(now - INCREMENTAL_MAX_WINDOW_MS));
-  const historical = range.end < liveCutoffDay;
-  const STALE_MS = 6 * 60 * 60 * 1000; // a source is stale 6h after its last sync
-  const SYNC_SOURCES = ["square", "shopify"] as const;
-  const stateBy = new Map(syncStates.map((s) => [s.id, s] as const));
-  const watermarks = SYNC_SOURCES.map(
-    (src) => stateBy.get(`${shop}:${src}-orders`)?.watermark ?? null,
+  const { stale, historical, lastSyncedAt } = evaluateFreshness(
+    shop,
+    syncStates,
+    range,
+    now,
   );
-  const errored = SYNC_SOURCES.map(
-    (src) => stateBy.get(`${shop}:${src}-orders`)?.status === "error",
-  );
-  const sourceFresh = SYNC_SOURCES.map(
-    (_src, i) =>
-      !errored[i] &&
-      watermarks[i] !== null &&
-      now - watermarks[i]!.getTime() <= STALE_MS,
-  );
-  // Display the laggard source's age; null if any source has never synced.
-  const lastSyncedAt = watermarks.some((w) => w === null)
-    ? null
-    : new Date(Math.min(...watermarks.map((w) => w!.getTime())));
-  const stale = historical ? false : sourceFresh.some((fresh) => !fresh);
   const lastSyncedLabel = lastSyncedAt ? refreshedLabel(lastSyncedAt, now) : null;
   const sync = summarizeSync(shop, syncStates, now);
 
@@ -663,8 +640,10 @@ export default function Analytics() {
   // SyncState's done/error rows persist across page loads, so only show this
   // run's result/stall banners after the user actually hit Refresh.
   const [refreshRequested, setRefreshRequested] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   useEffect(() => {
     setRefreshRequested(false);
+    setExportError(null);
   }, [range.start, range.end, type]);
 
   // While a sync runs, re-read the loader so live progress streams in and we
@@ -696,12 +675,20 @@ export default function Analytics() {
 
   const exportXlsx = async (typeOverride?: string) => {
     setExporting(true);
+    setExportError(null);
     try {
       const params = currentParams();
       if (typeOverride) params.type = typeOverride;
       const query = new URLSearchParams(params).toString();
       const response = await fetch(`/app/analytics/export?${query}`);
-      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      if (!response.ok) {
+        const message =
+          response.status === 409
+            ? await response.text()
+            : `Export failed (${response.status})`;
+        setExportError(message);
+        return;
+      }
       const blob = await response.blob();
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
@@ -710,6 +697,8 @@ export default function Analytics() {
         disposition.match(/filename="(.+)"/)?.[1] ?? "report.xlsx";
       link.click();
       URL.revokeObjectURL(link.href);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Export failed.");
     } finally {
       setExporting(false);
     }
@@ -850,6 +839,7 @@ export default function Analytics() {
             </s-stack>
           )}
           {actionError && <s-banner tone="critical">{actionError}</s-banner>}
+          {exportError && <s-banner tone="warning">{exportError}</s-banner>}
           {refreshRequested && sync.stalled && (
             <s-banner tone="warning">
               The sync stopped before finishing — it likely hit the time limit

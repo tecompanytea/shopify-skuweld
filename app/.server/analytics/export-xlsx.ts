@@ -7,7 +7,8 @@ import type { Top10Report } from "./top10-report";
 // Renders reports as .xlsx workbooks shaped like the manual templates.
 // Data fidelity is the contract; styling is intentionally minimal.
 
-const MONEY = "#,##0.00";
+const MONEY = "$#,##0.00";
+const MONEY0 = "$#,##0";
 const PCT = "0.0%";
 const PCT0 = "0%"; // Distribution mix is whole-percent, like the manual sheet
 
@@ -301,7 +302,7 @@ function writeWeeklySheet(
   // Weekly meeting report shows whole dollars and whole percents (no decimals).
   sheet.eachRow((row) => {
     row.eachCell((cell) => {
-      if (cell.numFmt === MONEY) cell.numFmt = "#,##0";
+      if (cell.numFmt === MONEY) cell.numFmt = MONEY0;
       else if (cell.numFmt === PCT) cell.numFmt = PCT0;
     });
   });

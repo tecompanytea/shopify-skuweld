@@ -1,7 +1,13 @@
 import type { LoaderFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
-import { resolveAnalyticsShop, resolveRange } from "../.server/analytics/request";
+import prisma from "../db.server";
+import {
+  analyticsShopOverride,
+  resolveAnalyticsShop,
+  resolveRange,
+} from "../.server/analytics/request";
+import { evaluateFreshness } from "../.server/analytics/freshness";
 import { computeWeeklyReport } from "../.server/analytics/weekly-report";
 import { computeProductSellingReport } from "../.server/analytics/product-selling-report";
 import { computeTop10Report } from "../.server/analytics/top10-report";
@@ -24,6 +30,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "weekly";
   const range = resolveRange(url.searchParams);
+  const override = analyticsShopOverride();
+  const syncStates = await prisma.syncState.findMany({ where: { shop } });
+  const { stale } = evaluateFreshness(shop, syncStates, range, Date.now());
+  if (stale && !override) {
+    throw new Response("Report data is stale. Click Refresh before exporting.", {
+      status: 409,
+    });
+  }
 
   let buffer: Buffer;
   let filename: string;
