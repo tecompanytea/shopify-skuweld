@@ -20,6 +20,8 @@ export interface SquareSkuEntry {
   inventoryQuantity: number;
   category?: string | null;
   priceCents?: number | null;
+  chineseName?: string | null;
+  flavorNotes?: string | null;
 }
 
 export interface ParityRow {

@@ -9,6 +9,11 @@ interface CatalogObject {
   type: string;
   id: string;
   created_at?: string;
+  // Dashboard-created custom attributes; each value embeds its display name.
+  custom_attribute_values?: Record<
+    string,
+    { name?: string; string_value?: string }
+  >;
   item_data?: {
     name?: string;
     image_ids?: string[];
@@ -40,6 +45,19 @@ export interface SquareProductRow {
   variationName: string;
   sku: string | null;
   priceCents: number | null; // null for variable-priced items
+  // Item-level custom attributes, matched by display name — the counterparts
+  // of the Shopify custom.chinese_name / custom.product_flavor metafields.
+  chineseName: string | null;
+  flavorNotes: string | null;
+}
+
+function customAttribute(object: CatalogObject, name: string): string | null {
+  for (const value of Object.values(object.custom_attribute_values ?? {})) {
+    if (value.name?.toLowerCase() === name.toLowerCase()) {
+      return value.string_value ?? null;
+    }
+  }
+  return null;
 }
 
 export async function listSquareProducts(
@@ -99,6 +117,8 @@ export async function listSquareProducts(
         variationName: variation.item_variation_data?.name ?? "",
         sku: variation.item_variation_data?.sku ?? null,
         priceCents: variation.item_variation_data?.price_money?.amount ?? null,
+        chineseName: customAttribute(object, "Chinese Name"),
+        flavorNotes: customAttribute(object, "Flavor Notes"),
       });
     }
   }

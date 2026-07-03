@@ -20,7 +20,9 @@ const shopifyRow = (over: Partial<ParityRow["shopify"]> = {}): ParityRow => ({
   square: null,
 });
 
-const squareOnlyRow = (): ParityRow => ({
+const squareOnlyRow = (
+  over: Partial<NonNullable<ParityRow["square"]>> = {},
+): ParityRow => ({
   sku: "SVC-01",
   shopify: null,
   square: {
@@ -31,6 +33,7 @@ const squareOnlyRow = (): ParityRow => ({
     inventoryQuantity: 0,
     category: "Service To Stay",
     priceCents: 1250,
+    ...over,
   },
 });
 
@@ -73,6 +76,19 @@ describe("buildSkuCsv", () => {
     const csv = buildSkuCsv([squareOnlyRow()]);
     const line = csv.slice(1).split("\r\n")[1];
     expect(line).toBe("SVC-01,Tea Service,,Service To Stay,Tea Service,,,12.50");
+  });
+
+  it("fills Chinese name and flavor notes from Square custom attributes", () => {
+    const csv = buildSkuCsv([
+      squareOnlyRow({
+        chineseName: "貴妃美人",
+        flavorNotes: "Rose, artichoke, muscat grape",
+      }),
+    ]);
+    const line = csv.slice(1).split("\r\n")[1];
+    expect(line).toBe(
+      'SVC-01,Tea Service,,Service To Stay,Tea Service,貴妃美人,"Rose, artichoke, muscat grape",12.50',
+    );
   });
 });
 

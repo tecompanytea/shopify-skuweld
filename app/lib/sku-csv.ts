@@ -69,8 +69,10 @@ export function buildSkuCsv(rows: ParityRow[]): string {
       rowVariant(row),
       rowCategory(row),
       row.shopify?.productTitle ?? row.square?.itemName ?? "",
-      row.shopify?.chineseName ?? "",
-      row.shopify?.flavorNotes ?? "",
+      // Shopify metafields win; Square custom attributes fill the gaps
+      // (service items live only in Square).
+      row.shopify?.chineseName ?? row.square?.chineseName ?? "",
+      row.shopify?.flavorNotes ?? row.square?.flavorNotes ?? "",
       rowPrice(row),
     ]),
   ];

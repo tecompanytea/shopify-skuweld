@@ -64,6 +64,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         inventoryQuantity: square.counts.get(row.variationId) ?? 0,
         category: row.categoryName,
         priceCents: row.priceCents,
+        chineseName: row.chineseName,
+        flavorNotes: row.flavorNotes,
       }))
     : [];
 
