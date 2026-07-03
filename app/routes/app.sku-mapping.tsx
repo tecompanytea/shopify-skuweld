@@ -114,7 +114,9 @@ export default function SkuMapping() {
   const shopify = useAppBridge();
   const [scope, setScope] = useState<Scope>(DEFAULT_SCOPE);
   const [scopeMenuReady, setScopeMenuReady] = useState(false);
-  const [sortField, setSortField] = useState<SortField>("name");
+  // Default to SKU order: the numeric scheme clusters a product's sizes and
+  // its Square/Shopify twins together, which name order scatters.
+  const [sortField, setSortField] = useState<SortField>("sku");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
