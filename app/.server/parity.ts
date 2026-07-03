@@ -7,6 +7,9 @@ export interface ShopifySkuEntry {
   variantGid: string;
   inventoryQuantity: number;
   category?: string | null;
+  price?: string | null; // "15.00"
+  chineseName?: string | null;
+  flavorNotes?: string | null;
 }
 
 export interface SquareSkuEntry {
@@ -16,6 +19,7 @@ export interface SquareSkuEntry {
   variationId: string;
   inventoryQuantity: number;
   category?: string | null;
+  priceCents?: number | null;
 }
 
 export interface ParityRow {

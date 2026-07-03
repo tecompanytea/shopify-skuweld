@@ -6,10 +6,15 @@ export interface ShopifyProductRow {
   productImageUrl: string | null;
   productType: string;
   status: string;
+  // Tea catalog metafields (custom.chinese_name / custom.product_flavor).
+  // v1 hardcodes Té Company's keys, like the analytics category bridge.
+  chineseName: string | null;
+  flavorNotes: string | null;
   variantGid: string;
   variantTitle: string;
   sku: string | null;
   inventoryQuantity: number;
+  price: string; // "15.00" — Admin API Money scalar
 }
 
 interface ProductsQueryResult {
@@ -24,12 +29,15 @@ interface ProductsQueryResult {
         } | null;
         productType: string;
         status: string;
+        chineseName: { value: string } | null;
+        flavorNotes: { value: string } | null;
         variants: {
           nodes: Array<{
             id: string;
             title: string;
             sku: string | null;
             inventoryQuantity: number | null;
+            price: string;
           }>;
         };
       }>;
@@ -63,12 +71,19 @@ const PRODUCTS_QUERY = `#graphql
         }
         productType
         status
+        chineseName: metafield(namespace: "custom", key: "chinese_name") {
+          value
+        }
+        flavorNotes: metafield(namespace: "custom", key: "product_flavor") {
+          value
+        }
         variants(first: 100) {
           nodes {
             id
             title
             sku
             inventoryQuantity
+            price
           }
         }
       }
@@ -104,10 +119,13 @@ export async function listShopifyProducts(
           productImageUrl: product.featuredMedia?.preview?.image?.url ?? null,
           productType: product.productType,
           status: product.status,
+          chineseName: product.chineseName?.value ?? null,
+          flavorNotes: product.flavorNotes?.value ?? null,
           variantGid: variant.id,
           variantTitle: variant.title,
           sku: variant.sku,
           inventoryQuantity: variant.inventoryQuantity ?? 0,
+          price: variant.price,
         });
       }
     }

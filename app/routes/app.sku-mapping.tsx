@@ -18,6 +18,8 @@ import {
   type ParityRow,
 } from "../.server/parity";
 import { hasSku } from "../lib/sku-normalize";
+import { buildSkuCsv, rowCategory, rowName, rowSku } from "../lib/sku-csv";
+import { toReportDay } from "../lib/periods";
 import styles from "../sku-mapping-table.module.css";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -40,6 +42,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       variantGid: row.variantGid,
       inventoryQuantity: row.inventoryQuantity,
       category: row.productType || null,
+      price: row.price,
+      chineseName: row.chineseName,
+      flavorNotes: row.flavorNotes,
     }),
   );
 
@@ -58,6 +63,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           variationId: row.variationId,
           inventoryQuantity: counts.get(row.variationId) ?? 0,
           category: row.categoryName,
+          priceCents: row.priceCents,
         }),
       );
       parity = computeParity(shopifyEntries, squareEntries);
@@ -103,31 +109,6 @@ const SORT_OPTIONS: { label: string; field: SortField }[] = [
   { label: "SKU", field: "sku" },
   { label: "Category", field: "category" },
 ];
-
-function rowName(row: ParityRow): string {
-  if (row.shopify) {
-    return row.shopify.variantTitle &&
-      row.shopify.variantTitle !== "Default Title"
-      ? `${row.shopify.productTitle} — ${row.shopify.variantTitle}`
-      : row.shopify.productTitle;
-  }
-  if (row.square) {
-    return row.square.variationName && row.square.variationName !== "Regular"
-      ? `${row.square.itemName} — ${row.square.variationName}`
-      : row.square.itemName;
-  }
-  return row.sku;
-}
-
-// The raw SKU as it exists on a channel (the normalized row key strips
-// case/whitespace, which would hide what the merchant actually typed).
-function rowSku(row: ParityRow): string {
-  return row.shopify?.sku ?? row.square?.sku ?? row.sku;
-}
-
-function rowCategory(row: ParityRow): string {
-  return row.shopify?.category || row.square?.category || "—";
-}
 
 function rowChannel(row: ParityRow): string {
   if (row.shopify && row.square) return "Both";
@@ -228,6 +209,22 @@ export default function SkuMapping() {
       `Copied ${skus.length} ${skus.length === 1 ? "SKU" : "SKUs"}`,
     );
   };
+  // CSV of the selected rows, in table (not click) order.
+  const exportSelectedCsv = () => {
+    const selected = new Set(selectedIds);
+    const rows = allRows.filter((row) => selected.has(row.sku));
+    const blob = new Blob([buildSkuCsv(rows)], {
+      type: "text/csv;charset=utf-8",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `SKU Export ${toReportDay(new Date())}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    shopify.toast.show(
+      `Exported ${rows.length} ${rows.length === 1 ? "SKU" : "SKUs"}`,
+    );
+  };
 
   return (
     <s-page heading="SKU Mapping">
@@ -288,6 +285,9 @@ export default function SkuMapping() {
                   </s-menu>
                   <s-button variant="secondary" onClick={copySelectedSkus}>
                     Copy SKUs
+                  </s-button>
+                  <s-button variant="secondary" onClick={exportSelectedCsv}>
+                    Export CSV
                   </s-button>
                 </s-stack>
               </s-box>
@@ -469,7 +469,7 @@ export default function SkuMapping() {
                         <s-text color="subdued">{rowSku(row)}</s-text>
                       </s-stack>
                     </s-table-cell>
-                    <s-table-cell>{rowCategory(row)}</s-table-cell>
+                    <s-table-cell>{rowCategory(row) || "—"}</s-table-cell>
                     <s-table-cell>
                       <s-badge>{rowChannel(row)}</s-badge>
                     </s-table-cell>

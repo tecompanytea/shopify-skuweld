@@ -19,6 +19,7 @@ interface CatalogObject {
   item_variation_data?: {
     name?: string;
     sku?: string;
+    price_money?: { amount?: number }; // smallest currency unit (cents)
   };
   image_data?: {
     url?: string;
@@ -38,6 +39,7 @@ export interface SquareProductRow {
   variationId: string;
   variationName: string;
   sku: string | null;
+  priceCents: number | null; // null for variable-priced items
 }
 
 export async function listSquareProducts(
@@ -96,6 +98,7 @@ export async function listSquareProducts(
         variationId: variation.id,
         variationName: variation.item_variation_data?.name ?? "",
         sku: variation.item_variation_data?.sku ?? null,
+        priceCents: variation.item_variation_data?.price_money?.amount ?? null,
       });
     }
   }
