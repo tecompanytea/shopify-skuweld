@@ -139,7 +139,18 @@ export default function SkuMapping() {
   ];
 
   // Filter + sort client-side so switching scope/search/sort is instant
-  // (the loader already fetched both full catalogs).
+  // (the loader already fetched both full catalogs). The comparator is
+  // shared with the CSV export so the file reads like the screen.
+  const compareRows = (a: ParityRow, b: ParityRow) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const pick = (row: ParityRow) =>
+      sortField === "sku"
+        ? rowSku(row)
+        : sortField === "category"
+          ? rowCategory(row)
+          : rowName(row);
+    return dir * pick(a).localeCompare(pick(b));
+  };
   const q = query.trim().toLowerCase();
   const filteredRows = allRows
     .filter((row) => {
@@ -156,16 +167,7 @@ export default function SkuMapping() {
           )
         : true,
     )
-    .sort((a, b) => {
-      const dir = sortDir === "asc" ? 1 : -1;
-      const pick = (row: ParityRow) =>
-        sortField === "sku"
-          ? rowSku(row)
-          : sortField === "category"
-            ? rowCategory(row)
-            : rowName(row);
-      return dir * pick(a).localeCompare(pick(b));
-    });
+    .sort(compareRows);
 
   // Clamp instead of resetting in every filter handler; handlers still snap
   // to page 0 so a narrowed filter starts from the top.
@@ -219,10 +221,13 @@ export default function SkuMapping() {
       `Copied ${skus.length} ${skus.length === 1 ? "SKU" : "SKUs"}`,
     );
   };
-  // CSV of the selected rows, in table (not click) order.
+  // CSV of the selected rows in the table's current sort order — allRows is
+  // grouped matched/shopify-only/square-only, which would split SKU families.
   const exportSelectedCsv = () => {
     const selected = new Set(selectedIds);
-    const rows = allRows.filter((row) => selected.has(row.sku));
+    const rows = allRows
+      .filter((row) => selected.has(row.sku))
+      .sort(compareRows);
     const blob = new Blob([buildSkuCsv(rows)], {
       type: "text/csv;charset=utf-8",
     });
