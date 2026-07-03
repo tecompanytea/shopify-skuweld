@@ -35,11 +35,15 @@ export interface WeeklyReport {
   range: DayRange;
   lyRange: DayRange;
   compare: ComparisonMode;
-  channels: {
-    wv: CellPair;
-    ev: CellPair;
-    ecom: CellPair;
-    invoiced: CellPair;
+  // The categorized channels (WV/EV/Ecom) with their combined total — every
+  // "TOTAL w/o Invoiced" in the UI and the workbook is `grand.total`, and the
+  // category/section/group blocks all foot to it.
+  grand: ChannelCells;
+  // Square invoices are never categorized, so they live outside `grand`.
+  invoiced: CellPair;
+  totals: {
+    woEcom: CellPair; // WV + EV + Invoiced
+    all: CellPair; // WV + EV + Ecom + Invoiced
   };
   categories: CategoryReportRow[];
   sections: {
@@ -146,9 +150,9 @@ export async function computeWeeklyReport(
     };
   });
 
-  // Store channels are the sum of their category rows (the template's =SUM
-  // over the category table), so the channel and category blocks always
-  // agree. The same per-channel roll-up feeds the Distribution table, where
+  // Channels are the sum of their category rows (the template's =SUM over
+  // the category table), so the channel and category blocks always agree.
+  // The same per-channel roll-up feeds the Distribution table, where
   // sections and groups need their WV/EV/Web split, not just the total.
   const sectionCells = (section: CategoryRow["section"]): ChannelCells =>
     sumChannelCells(categories.filter((c) => c.row.section === section));
@@ -160,19 +164,20 @@ export async function computeWeeklyReport(
   }));
 
   const grand = sumChannelCells(categories);
+  const invoiced: CellPair = {
+    ty: ty.byChannel.get("INVOICED") ?? 0,
+    ly: ly.byChannel.get("INVOICED") ?? 0,
+  };
 
   return {
     range,
     lyRange,
     compare,
-    channels: {
-      wv: grand.wv,
-      ev: grand.ev,
-      ecom: grand.ecom,
-      invoiced: {
-        ty: ty.byChannel.get("INVOICED") ?? 0,
-        ly: ly.byChannel.get("INVOICED") ?? 0,
-      },
+    grand,
+    invoiced,
+    totals: {
+      woEcom: addPair(addPair(grand.wv, grand.ev), invoiced),
+      all: addPair(grand.total, invoiced),
     },
     categories,
     sections: {

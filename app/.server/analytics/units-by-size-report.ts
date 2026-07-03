@@ -1,6 +1,7 @@
 import prisma from "../../db.server";
 import { SIZE_COLUMNS, type SizeColumn } from "../../lib/analytics-scopes";
 import type { DayRange } from "../../lib/periods";
+import { productName, skuFamily } from "../../lib/sku-scheme";
 
 export { SIZE_COLUMNS, type SizeColumn };
 
@@ -87,22 +88,15 @@ export async function computeUnitsBySizeReport(
   const products = new Map<string, Acc>();
   const channels = new Set<string>();
 
-  const lineName = (line: { itemName: string; variationName: string | null }) =>
-    line.variationName && line.itemName.endsWith(` - ${line.variationName}`)
-      ? line.itemName.slice(0, -(line.variationName.length + 3))
-      : line.itemName;
-  const lineFamily = (line: { sku: string | null }) =>
-    line.sku && /^\d{6}$/.test(line.sku) ? line.sku.slice(0, 4) : null;
-
   // Pass 1: learn each product name's SKU family by unit-majority vote.
   // This both adopts SKU-less lines into their product (same name, no SKU)
   // and corrects mislabeled SKUs (a variant carrying another product's SKU
   // groups with its name, not the wrong family).
   const votes = new Map<string, Map<string, number>>();
   for (const line of lines) {
-    const family = lineFamily(line);
+    const family = skuFamily(line.sku);
     if (!family) continue;
-    const name = lineName(line).toLowerCase();
+    const name = productName(line.itemName, line.variationName).toLowerCase();
     let tally = votes.get(name);
     if (!tally) {
       tally = new Map();
@@ -118,8 +112,8 @@ export async function computeUnitsBySizeReport(
 
   for (const line of lines) {
     channels.add(line.channel);
-    const name = lineName(line);
-    const family = nameToFamily.get(name.toLowerCase()) ?? lineFamily(line);
+    const name = productName(line.itemName, line.variationName);
+    const family = nameToFamily.get(name.toLowerCase()) ?? skuFamily(line.sku);
     const key = family ?? `name:${name.toLowerCase()}`;
     let acc = products.get(key);
     if (!acc) {

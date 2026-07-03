@@ -8,6 +8,7 @@ import {
   type ComparisonMode,
   type DayRange,
 } from "../../lib/periods";
+import { productName, skuFamily } from "../../lib/sku-scheme";
 
 // Product-selling report: every product in one category, net sales + units,
 // TY vs calendar-aligned LY, per channel and combined. Mirrors the manual
@@ -47,20 +48,6 @@ export interface ProductSellingReport {
 }
 
 const CHANNELS = ["WV", "EV", "ECOM"] as const;
-
-// Shopify line names are "Product - Variant"; strip the variant suffix so
-// products group across sizes (the manual reports combine sizes).
-function productName(itemName: string, variationName: string | null): string {
-  if (variationName && itemName.endsWith(` - ${variationName}`)) {
-    return itemName.slice(0, -(variationName.length + 3));
-  }
-  return itemName;
-}
-
-// "100204" -> "1002" (category digit + family); null when not in scheme.
-function skuFamily(sku: string | null): string | null {
-  return sku && /^\d{6}$/.test(sku) ? sku.slice(0, 4) : null;
-}
 
 interface Accumulator {
   name: string;

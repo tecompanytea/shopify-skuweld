@@ -122,33 +122,15 @@ function writeWeeklySheet(
 
   const channelHeader = sheet.addRow(["BY CHANNEL", "TY", "LY", "% to LY"]);
   channelHeader.font = { bold: true };
-  const { channels } = report;
+  const { grand, invoiced, totals } = report;
   const channelRows: Array<[string, CellPair]> = [
-    ["West Village", channels.wv],
-    ["East Village", channels.ev],
-    ["E-Commerce", channels.ecom],
-    ["Invoiced", channels.invoiced],
-    [
-      "TOTAL w.o. Inv",
-      {
-        ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-        ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
-      },
-    ],
-    [
-      "TOTAL w.o. Ecomm",
-      {
-        ty: channels.wv.ty + channels.ev.ty + channels.invoiced.ty,
-        ly: channels.wv.ly + channels.ev.ly + channels.invoiced.ly,
-      },
-    ],
-    [
-      "TOTAL",
-      {
-        ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty + channels.invoiced.ty,
-        ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly + channels.invoiced.ly,
-      },
-    ],
+    ["West Village", grand.wv],
+    ["East Village", grand.ev],
+    ["E-Commerce", grand.ecom],
+    ["Invoiced", invoiced],
+    ["TOTAL w.o. Inv", grand.total],
+    ["TOTAL w.o. Ecomm", totals.woEcom],
+    ["TOTAL", totals.all],
   ];
   for (const [label, pair] of channelRows) {
     const row = sheet.addRow([label]);
@@ -187,22 +169,14 @@ function writeWeeklySheet(
   });
   catHeader.font = { bold: true };
   // All three blocks (categories, sections, groups) foot to the same grand
-  // total, so each ends with it. Invoiced is uncategorized, so it's excluded.
-  const grand: ChannelCells = {
-    total: {
-      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
-    },
-    wv: channels.wv,
-    ev: channels.ev,
-    ecom: channels.ecom,
-  };
+  // total (report.grand), so each ends with it. Invoiced is uncategorized,
+  // so it's excluded.
   const distDenom = {
-    total: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-    strs: channels.wv.ty + channels.ev.ty,
-    wv: channels.wv.ty,
-    ev: channels.ev.ty,
-    web: channels.ecom.ty,
+    total: grand.total.ty,
+    strs: grand.wv.ty + grand.ev.ty,
+    wv: grand.wv.ty,
+    ev: grand.ev.ty,
+    web: grand.ecom.ty,
   };
   const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
 

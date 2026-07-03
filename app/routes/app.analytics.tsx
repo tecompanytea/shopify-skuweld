@@ -263,35 +263,13 @@ function PairCells({ pair }: { pair: CellPair }) {
 }
 
 function ChannelBlock({ report }: { report: WeeklyReport }) {
-  const { channels } = report;
-  const totals = {
-    woInv: {
-      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
-    },
-    woEcom: {
-      ty: channels.wv.ty + channels.ev.ty + channels.invoiced.ty,
-      ly: channels.wv.ly + channels.ev.ly + channels.invoiced.ly,
-    },
-    all: {
-      ty:
-        channels.wv.ty +
-        channels.ev.ty +
-        channels.ecom.ty +
-        channels.invoiced.ty,
-      ly:
-        channels.wv.ly +
-        channels.ev.ly +
-        channels.ecom.ly +
-        channels.invoiced.ly,
-    },
-  };
+  const { grand, invoiced, totals } = report;
   const rows: Array<[string, CellPair]> = [
-    ["West Village", channels.wv],
-    ["East Village", channels.ev],
-    ["E-Commerce", channels.ecom],
-    ["Invoiced", channels.invoiced],
-    ["TOTAL w/o Invoiced", totals.woInv],
+    ["West Village", grand.wv],
+    ["East Village", grand.ev],
+    ["E-Commerce", grand.ecom],
+    ["Invoiced", invoiced],
+    ["TOTAL w/o Invoiced", grand.total],
     ["TOTAL w/o E-Comm", totals.woEcom],
     ["TOTAL", totals.all],
   ];
@@ -341,17 +319,7 @@ function CategoryBlock({ report }: { report: WeeklyReport }) {
   // Categories, section subtotals, and group roll-ups each partition every
   // category, so all three blocks foot to the same grand total (invoiced
   // excluded — it isn't categorized).
-  const grand: ChannelCells = {
-    total: {
-      ty:
-        report.channels.wv.ty + report.channels.ev.ty + report.channels.ecom.ty,
-      ly:
-        report.channels.wv.ly + report.channels.ev.ly + report.channels.ecom.ly,
-    },
-    wv: report.channels.wv,
-    ev: report.channels.ev,
-    ecom: report.channels.ecom,
-  };
+  const { grand } = report;
   return (
     <s-table>
       <s-table-header-row>
@@ -390,13 +358,13 @@ function distPct(value: number, denom: number): string {
 }
 
 function DistributionBlock({ report }: { report: WeeklyReport }) {
-  const { channels } = report;
+  const { grand } = report;
   const denom = {
-    total: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-    strs: channels.wv.ty + channels.ev.ty,
-    wv: channels.wv.ty,
-    ev: channels.ev.ty,
-    web: channels.ecom.ty,
+    total: grand.total.ty,
+    strs: grand.wv.ty + grand.ev.ty,
+    wv: grand.wv.ty,
+    ev: grand.ev.ty,
+    web: grand.ecom.ty,
   };
   const row = (label: string, c: ChannelCells, key: string = label) => (
     <s-table-row key={key}>
@@ -410,15 +378,6 @@ function DistributionBlock({ report }: { report: WeeklyReport }) {
   );
   // The section and group blocks each partition every category, so each foots
   // to 100% per column — a TOTAL row confirms the mix adds up.
-  const grand: ChannelCells = {
-    total: {
-      ty: channels.wv.ty + channels.ev.ty + channels.ecom.ty,
-      ly: channels.wv.ly + channels.ev.ly + channels.ecom.ly,
-    },
-    wv: channels.wv,
-    ev: channels.ev,
-    ecom: channels.ecom,
-  };
   return (
     <s-table>
       <s-table-header-row>
