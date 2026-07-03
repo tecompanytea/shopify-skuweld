@@ -55,6 +55,20 @@ describe("buildSkuCsv", () => {
     expect(csv).toContain('"Notes of ""stone fruit"""');
   });
 
+  it("orders rows by SKU regardless of input order", () => {
+    const csv = buildSkuCsv([
+      squareOnlyRow(), // SVC-01
+      shopifyRow({ sku: "100208" }),
+      shopifyRow({ sku: "100202" }),
+    ]);
+    const skus = csv
+      .slice(1)
+      .split("\r\n")
+      .slice(1, -1)
+      .map((line) => line.split(",")[0]);
+    expect(skus).toEqual(["100202", "100208", "SVC-01"]);
+  });
+
   it("falls back to Square identity and price for Square-only rows", () => {
     const csv = buildSkuCsv([squareOnlyRow()]);
     const line = csv.slice(1).split("\r\n")[1];

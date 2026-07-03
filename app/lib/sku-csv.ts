@@ -47,7 +47,11 @@ function csvField(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
+// Rows are written in SKU order regardless of input order: the numeric
+// scheme clusters a family's sizes and its cross-channel twins, which is
+// the point of the sheet.
 export function buildSkuCsv(rows: ParityRow[]): string {
+  const sorted = [...rows].sort((a, b) => rowSku(a).localeCompare(rowSku(b)));
   const lines = [
     [
       "SKU",
@@ -59,7 +63,7 @@ export function buildSkuCsv(rows: ParityRow[]): string {
       "Flavor Notes",
       "Price",
     ],
-    ...rows.map((row) => [
+    ...sorted.map((row) => [
       rowSku(row),
       rowName(row),
       rowVariant(row),

@@ -114,9 +114,7 @@ export default function SkuMapping() {
   const shopify = useAppBridge();
   const [scope, setScope] = useState<Scope>(DEFAULT_SCOPE);
   const [scopeMenuReady, setScopeMenuReady] = useState(false);
-  // Default to SKU order: the numeric scheme clusters a product's sizes and
-  // its Square/Shopify twins together, which name order scatters.
-  const [sortField, setSortField] = useState<SortField>("sku");
+  const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -139,8 +137,7 @@ export default function SkuMapping() {
   ];
 
   // Filter + sort client-side so switching scope/search/sort is instant
-  // (the loader already fetched both full catalogs). The comparator is
-  // shared with the CSV export so the file reads like the screen.
+  // (the loader already fetched both full catalogs).
   const compareRows = (a: ParityRow, b: ParityRow) => {
     const dir = sortDir === "asc" ? 1 : -1;
     const pick = (row: ParityRow) =>
@@ -221,13 +218,11 @@ export default function SkuMapping() {
       `Copied ${skus.length} ${skus.length === 1 ? "SKU" : "SKUs"}`,
     );
   };
-  // CSV of the selected rows in the table's current sort order — allRows is
-  // grouped matched/shopify-only/square-only, which would split SKU families.
+  // The CSV orders itself by SKU (buildSkuCsv's contract) regardless of the
+  // on-screen sort — the scheme clusters families and their channel twins.
   const exportSelectedCsv = () => {
     const selected = new Set(selectedIds);
-    const rows = allRows
-      .filter((row) => selected.has(row.sku))
-      .sort(compareRows);
+    const rows = allRows.filter((row) => selected.has(row.sku));
     const blob = new Blob([buildSkuCsv(rows)], {
       type: "text/csv;charset=utf-8",
     });
