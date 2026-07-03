@@ -20,35 +20,41 @@ export async function getInventoryCounts(
 ): Promise<Map<string, number>> {
   const totals = new Map<string, number>();
 
+  const chunks: string[][] = [];
   for (let i = 0; i < variationIds.length; i += CHUNK_SIZE) {
-    const chunk = variationIds.slice(i, i + CHUNK_SIZE);
-    let cursor: string | undefined;
-
-    do {
-      const data = await squareFetch<BatchRetrieveCountsResponse>(
-        shop,
-        "/v2/inventory/counts/batch-retrieve",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            catalog_object_ids: chunk,
-            ...(cursor ? { cursor } : {}),
-          }),
-        },
-      );
-
-      for (const count of data.counts ?? []) {
-        if (count.state !== "IN_STOCK" || !count.catalog_object_id) continue;
-        const quantity = Number(count.quantity ?? "0");
-        if (!Number.isFinite(quantity)) continue;
-        totals.set(
-          count.catalog_object_id,
-          (totals.get(count.catalog_object_id) ?? 0) + quantity,
-        );
-      }
-      cursor = data.cursor;
-    } while (cursor);
+    chunks.push(variationIds.slice(i, i + CHUNK_SIZE));
   }
+  // Chunks are independent — fetch them concurrently; only each chunk's
+  // cursor pages are serial.
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      let cursor: string | undefined;
+      do {
+        const data = await squareFetch<BatchRetrieveCountsResponse>(
+          shop,
+          "/v2/inventory/counts/batch-retrieve",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              catalog_object_ids: chunk,
+              ...(cursor ? { cursor } : {}),
+            }),
+          },
+        );
+
+        for (const count of data.counts ?? []) {
+          if (count.state !== "IN_STOCK" || !count.catalog_object_id) continue;
+          const quantity = Number(count.quantity ?? "0");
+          if (!Number.isFinite(quantity)) continue;
+          totals.set(
+            count.catalog_object_id,
+            (totals.get(count.catalog_object_id) ?? 0) + quantity,
+          );
+        }
+        cursor = data.cursor;
+      } while (cursor);
+    }),
+  );
 
   return totals;
 }

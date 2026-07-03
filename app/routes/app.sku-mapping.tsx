@@ -12,11 +12,7 @@ import {
   getSquareConnection,
   SquareNotConnectedError,
 } from "../.server/square/client";
-import {
-  computeParity,
-  type ParityResult,
-  type ParityRow,
-} from "../.server/parity";
+import { computeParity, type ParityRow } from "../.server/parity";
 import { hasSku } from "../lib/sku-normalize";
 import { buildSkuCsv, rowCategory, rowName, rowSku } from "../lib/sku-csv";
 import { toReportDay } from "../lib/periods";
@@ -25,15 +21,27 @@ import styles from "../sku-mapping-table.module.css";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
-  let squareConnected = Boolean(await getSquareConnection(session.shop));
-  let parity: ParityResult = {
-    both: [],
-    shopifyOnly: [],
-    squareOnly: [],
-    duplicates: [],
-  };
+  // The two catalogs don't depend on each other — fetch them in parallel
+  // (each still pages serially through its own API). `square` is null when
+  // Square isn't connected.
+  const [shopifyRows, square] = await Promise.all([
+    listShopifyProducts(admin),
+    (async () => {
+      if (!(await getSquareConnection(session.shop))) return null;
+      try {
+        const catalog = await listSquareProducts(session.shop);
+        const counts = await getInventoryCounts(
+          session.shop,
+          catalog.map((row) => row.variationId),
+        );
+        return { catalog, counts };
+      } catch (error) {
+        if (error instanceof SquareNotConnectedError) return null;
+        throw error;
+      }
+    })(),
+  ]);
 
-  const shopifyRows = await listShopifyProducts(admin);
   const shopifyEntries = shopifyRows.filter((row) => hasSku(row.sku)).map(
     (row) => ({
       sku: row.sku as string,
@@ -47,40 +55,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       flavorNotes: row.flavorNotes,
     }),
   );
+  const squareEntries = square
+    ? square.catalog.filter((row) => hasSku(row.sku)).map((row) => ({
+        sku: row.sku as string,
+        itemName: row.itemName,
+        variationName: row.variationName,
+        variationId: row.variationId,
+        inventoryQuantity: square.counts.get(row.variationId) ?? 0,
+        category: row.categoryName,
+        priceCents: row.priceCents,
+      }))
+    : [];
 
-  if (squareConnected) {
-    try {
-      const catalog = await listSquareProducts(session.shop);
-      const counts = await getInventoryCounts(
-        session.shop,
-        catalog.map((row) => row.variationId),
-      );
-      const squareEntries = catalog.filter((row) => hasSku(row.sku)).map(
-        (row) => ({
-          sku: row.sku as string,
-          itemName: row.itemName,
-          variationName: row.variationName,
-          variationId: row.variationId,
-          inventoryQuantity: counts.get(row.variationId) ?? 0,
-          category: row.categoryName,
-          priceCents: row.priceCents,
-        }),
-      );
-      parity = computeParity(shopifyEntries, squareEntries);
-    } catch (error) {
-      if (error instanceof SquareNotConnectedError) {
-        squareConnected = false;
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  if (!squareConnected) {
-    parity = computeParity(shopifyEntries, []);
-  }
-
-  return { parity, squareConnected };
+  return {
+    parity: computeParity(shopifyEntries, squareEntries),
+    squareConnected: square !== null,
+  };
 };
 
 export const headers: HeadersFunction = (headersArgs) =>
@@ -105,10 +95,14 @@ type SortField = "name" | "sku" | "category";
 type SortDir = "asc" | "desc";
 
 const SORT_OPTIONS: { label: string; field: SortField }[] = [
-  { label: "Product", field: "name" },
+  { label: "SKU Name", field: "name" },
   { label: "SKU", field: "sku" },
   { label: "Category", field: "category" },
 ];
+
+// Client-side page size: all rows are in memory, so paging is instant —
+// this only caps how many web-component rows mount at once.
+const PAGE_SIZE = 50;
 
 function rowChannel(row: ParityRow): string {
   if (row.shopify && row.square) return "Both";
@@ -125,6 +119,7 @@ export default function SkuMapping() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [page, setPage] = useState(0);
   const activeLabel = SCOPE_OPTIONS.find((o) => o.scope === scope)!.label;
 
   // A SKU is matched when it lives on both channels and the code is not
@@ -144,7 +139,7 @@ export default function SkuMapping() {
   // Filter + sort client-side so switching scope/search/sort is instant
   // (the loader already fetched both full catalogs).
   const q = query.trim().toLowerCase();
-  const visibleRows = allRows
+  const filteredRows = allRows
     .filter((row) => {
       if (scope === "both") return Boolean(row.shopify && row.square);
       if (scope === "shopify") return Boolean(row.shopify && !row.square);
@@ -170,25 +165,38 @@ export default function SkuMapping() {
       return dir * pick(a).localeCompare(pick(b));
     });
 
-  const visibleRowIds = visibleRows.map((row) => row.sku);
-  const selectedVisibleCount = visibleRowIds.filter((id) =>
+  // Clamp instead of resetting in every filter handler; handlers still snap
+  // to page 0 so a narrowed filter starts from the top.
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = filteredRows.slice(
+    currentPage * PAGE_SIZE,
+    (currentPage + 1) * PAGE_SIZE,
+  );
+
+  // Header checkbox works on the current page (like the admin Orders list);
+  // the "N selected" menu offers the whole filtered set.
+  const pageRowIds = pageRows.map((row) => row.sku);
+  const selectedOnPage = pageRowIds.filter((id) =>
     selectedIds.includes(id),
   ).length;
-  const allVisibleSelected =
-    visibleRowIds.length > 0 && selectedVisibleCount === visibleRowIds.length;
-  const someVisibleSelected =
-    selectedVisibleCount > 0 && selectedVisibleCount < visibleRowIds.length;
-  const selectVisibleRows = () => {
+  const allPageSelected =
+    pageRowIds.length > 0 && selectedOnPage === pageRowIds.length;
+  const somePageSelected = selectedOnPage > 0 && !allPageSelected;
+  const allFilteredSelected =
+    filteredRows.length > 0 &&
+    filteredRows.every((row) => selectedIds.includes(row.sku));
+  const selectAllFiltered = () => {
     setSelectedIds((current) =>
-      Array.from(new Set([...current, ...visibleRowIds])),
+      Array.from(new Set([...current, ...filteredRows.map((row) => row.sku)])),
     );
   };
   const clearSelectedRows = () => setSelectedIds([]);
-  const toggleVisibleRows = () => {
+  const togglePageRows = () => {
     setSelectedIds((current) => {
-      const visible = new Set(visibleRowIds);
-      if (allVisibleSelected) return current.filter((id) => !visible.has(id));
-      return Array.from(new Set([...current, ...visibleRowIds]));
+      const pageIds = new Set(pageRowIds);
+      if (allPageSelected) return current.filter((id) => !pageIds.has(id));
+      return Array.from(new Set([...current, ...pageRowIds]));
     });
   };
   const toggleRow = (id: string) => {
@@ -257,7 +265,13 @@ export default function SkuMapping() {
         </s-section>
       ) : (
         <s-section padding="none">
-          <s-table>
+          <s-table
+            paginate
+            hasPreviousPage={currentPage > 0}
+            hasNextPage={currentPage < pageCount - 1}
+            onPreviousPage={() => setPage(Math.max(0, currentPage - 1))}
+            onNextPage={() => setPage(Math.min(pageCount - 1, currentPage + 1))}
+          >
             {selectedIds.length > 0 ? (
               <s-box
                 slot="filters"
@@ -276,9 +290,11 @@ export default function SkuMapping() {
                     id="mapping-selection-menu"
                     accessibilityLabel="Selection actions"
                   >
-                    {!allVisibleSelected ? (
-                      <s-button onClick={selectVisibleRows}>
-                        Select all {visibleRowIds.length} on page
+                    {!allFilteredSelected ? (
+                      <s-button onClick={selectAllFiltered}>
+                        {scope === "all" && !q
+                          ? `Select all ${filteredRows.length} in this store`
+                          : `Select all ${filteredRows.length} in this view`}
                       </s-button>
                     ) : null}
                     <s-button onClick={clearSelectedRows}>Unselect all</s-button>
@@ -330,7 +346,10 @@ export default function SkuMapping() {
                                 key={option.scope}
                                 commandFor="mapping-scope-popover"
                                 command="--hide"
-                                onClick={() => setScope(option.scope)}
+                                onClick={() => {
+                                  setScope(option.scope);
+                                  setPage(0);
+                                }}
                                 paddingInline="small-200"
                                 paddingBlock="small-400"
                                 borderRadius="base"
@@ -374,6 +393,7 @@ export default function SkuMapping() {
                     onClick={() => {
                       setSearchOpen((open) => !open);
                       setQuery("");
+                      setPage(0);
                     }}
                   />
                   <s-button
@@ -391,7 +411,10 @@ export default function SkuMapping() {
                           values={[sortField]}
                           onChange={(event) => {
                             const next = event.currentTarget.values[0];
-                            if (next) setSortField(next as SortField);
+                            if (next) {
+                              setSortField(next as SortField);
+                              setPage(0);
+                            }
                           }}
                         >
                           {SORT_OPTIONS.map((option) => (
@@ -411,6 +434,7 @@ export default function SkuMapping() {
                             const next = event.currentTarget.values[0];
                             if (next === "asc" || next === "desc") {
                               setSortDir(next);
+                              setPage(0);
                             }
                           }}
                         >
@@ -428,9 +452,10 @@ export default function SkuMapping() {
                   labelAccessibilityVisibility="exclusive"
                   placeholder="Search by product, SKU, or category"
                   value={query}
-                  onInput={(event) =>
-                    setQuery((event.target as HTMLInputElement).value)
-                  }
+                  onInput={(event) => {
+                    setQuery((event.target as HTMLInputElement).value);
+                    setPage(0);
+                  }}
                 />
               ) : null}
             </s-stack>
@@ -438,11 +463,11 @@ export default function SkuMapping() {
             <s-table-header-row>
               <s-table-header listSlot="inline">
                 <s-checkbox
-                  {...(allVisibleSelected ? { checked: true } : {})}
-                  {...(someVisibleSelected ? { indeterminate: true } : {})}
-                  {...(visibleRowIds.length === 0 ? { disabled: true } : {})}
-                  accessibilityLabel="Select all SKUs"
-                  onChange={toggleVisibleRows}
+                  {...(allPageSelected ? { checked: true } : {})}
+                  {...(somePageSelected ? { indeterminate: true } : {})}
+                  {...(pageRowIds.length === 0 ? { disabled: true } : {})}
+                  accessibilityLabel="Select all SKUs on this page"
+                  onChange={togglePageRows}
                 />
               </s-table-header>
               <s-table-header listSlot="primary">Product</s-table-header>
@@ -451,7 +476,7 @@ export default function SkuMapping() {
               <s-table-header listSlot="labeled">Status</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {visibleRows.map((row, i) => {
+              {pageRows.map((row, i) => {
                 const selected = selectedIds.includes(row.sku);
                 return (
                   <s-table-row key={row.sku}>
