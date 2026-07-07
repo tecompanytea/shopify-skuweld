@@ -338,7 +338,7 @@ export function GroupedProductTable({
             <s-stack direction="inline" gap="small" alignItems="center">
               {onPublishProduct && publishModalId && (
                 <s-button
-                  variant="primary"
+                  variant="secondary"
                   disabled={selectedProducts.length !== 1}
                   commandFor={publishModalId}
                   command="--show"
