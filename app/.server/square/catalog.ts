@@ -5,32 +5,62 @@ interface CatalogListResponse {
   objects?: CatalogObject[];
 }
 
-interface CatalogObject {
+export interface CatalogObject {
   type: string;
   id: string;
   created_at?: string;
+  present_at_all_locations?: boolean;
   // Dashboard-created custom attributes; each value embeds its display name.
   custom_attribute_values?: Record<
     string,
-    { name?: string; string_value?: string }
+    {
+      key?: string;
+      name?: string;
+      custom_attribute_definition_id?: string;
+      type?: string;
+      string_value?: string;
+    }
   >;
   item_data?: {
     name?: string;
+    description_html?: string;
+    product_type?: string;
+    is_taxable?: boolean;
+    tax_ids?: string[];
     image_ids?: string[];
     categories?: Array<{ id: string }>;
     reporting_category?: { id: string };
     variations?: CatalogObject[];
   };
   item_variation_data?: {
+    item_id?: string;
     name?: string;
     sku?: string;
-    price_money?: { amount?: number }; // smallest currency unit (cents)
+    pricing_type?: string;
+    price_money?: { amount?: number | null; currency?: string }; // smallest currency unit (cents)
+    track_inventory?: boolean;
+    sellable?: boolean;
+    stockable?: boolean;
   };
   image_data?: {
     url?: string;
   };
   category_data?: {
     name?: string;
+    category_type?: string;
+  };
+  tax_data?: {
+    name?: string;
+    percentage?: string;
+    enabled?: boolean;
+    calculation_phase?: string;
+    inclusion_type?: string;
+  };
+  custom_attribute_definition_data?: {
+    type?: string;
+    name?: string;
+    key?: string;
+    allowed_object_types?: string[];
   };
 }
 
@@ -51,6 +81,68 @@ export interface SquareProductRow {
   flavorNotes: string | null;
 }
 
+export interface SquareCategory {
+  id: string;
+  name: string;
+}
+
+export interface SquareTax {
+  id: string;
+  name: string;
+  percentage: string | null;
+  enabled: boolean;
+}
+
+export async function listSquareCatalogObjects(
+  shop: string,
+  types: string,
+): Promise<CatalogObject[]> {
+  const objects: CatalogObject[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const params = new URLSearchParams({ types });
+    if (cursor) params.set("cursor", cursor);
+    const data = await squareFetch<CatalogListResponse>(
+      shop,
+      `/v2/catalog/list?${params.toString()}`,
+    );
+    objects.push(...(data.objects ?? []));
+    cursor = data.cursor;
+  } while (cursor);
+
+  return objects;
+}
+
+export async function listSquareCategories(
+  shop: string,
+): Promise<SquareCategory[]> {
+  const objects = await listSquareCatalogObjects(shop, "CATEGORY");
+  return objects
+    .filter((object) => object.type === "CATEGORY" && object.category_data?.name)
+    .map((object) => ({
+      id: object.id,
+      name: object.category_data!.name!,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function listSquareTaxes(shop: string): Promise<SquareTax[]> {
+  const objects = await listSquareCatalogObjects(shop, "TAX");
+  return objects
+    .filter((object) => object.type === "TAX" && object.tax_data?.name)
+    .map((object) => ({
+      id: object.id,
+      name: object.tax_data!.name!,
+      percentage: object.tax_data?.percentage ?? null,
+      enabled: object.tax_data?.enabled ?? false,
+    }))
+    .sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 function customAttribute(object: CatalogObject, name: string): string | null {
   for (const value of Object.values(object.custom_attribute_values ?? {})) {
     if (value.name?.toLowerCase() === name.toLowerCase()) {
@@ -69,27 +161,16 @@ export async function listSquareProducts(
   const items: CatalogObject[] = [];
   const imageUrlById = new Map<string, string>();
   const categoryNameById = new Map<string, string>();
-  let cursor: string | undefined;
-
-  do {
-    const params = new URLSearchParams({ types: "ITEM,IMAGE,CATEGORY" });
-    if (cursor) params.set("cursor", cursor);
-    const data = await squareFetch<CatalogListResponse>(
-      shop,
-      `/v2/catalog/list?${params.toString()}`,
-    );
-
-    for (const object of data.objects ?? []) {
-      if (object.type === "IMAGE" && object.image_data?.url) {
-        imageUrlById.set(object.id, object.image_data.url);
-      } else if (object.type === "CATEGORY" && object.category_data?.name) {
-        categoryNameById.set(object.id, object.category_data.name);
-      } else if (object.type === "ITEM" && object.item_data) {
-        items.push(object);
-      }
+  const objects = await listSquareCatalogObjects(shop, "ITEM,IMAGE,CATEGORY");
+  for (const object of objects) {
+    if (object.type === "IMAGE" && object.image_data?.url) {
+      imageUrlById.set(object.id, object.image_data.url);
+    } else if (object.type === "CATEGORY" && object.category_data?.name) {
+      categoryNameById.set(object.id, object.category_data.name);
+    } else if (object.type === "ITEM" && object.item_data) {
+      items.push(object);
     }
-    cursor = data.cursor;
-  } while (cursor);
+  }
 
   const rows: SquareProductRow[] = [];
   for (const object of items) {

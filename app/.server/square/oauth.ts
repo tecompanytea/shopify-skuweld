@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 
 export const SQUARE_BASE_URL = "https://connect.squareup.com";
 
-// Read-only v1 scopes; adding write scopes later only requires extending this
-// list and sending the merchant through consent again.
+// Catalog publishing needs ITEMS_WRITE. Existing read-only connections keep
+// their stored scope string, so Settings can ask the merchant to reconnect.
 export const SQUARE_SCOPES = [
   "ITEMS_READ",
+  "ITEMS_WRITE",
   "INVENTORY_READ",
   "MERCHANT_PROFILE_READ",
   // Analytics: order/invoice history for the reports fact table.
@@ -89,6 +90,7 @@ export interface SquareTokenResponse {
   refresh_token: string;
   expires_at: string; // ISO 8601
   merchant_id: string;
+  scope?: string;
 }
 
 async function tokenRequest(

@@ -4,8 +4,13 @@ import { useFetcher, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
-import { getSquareConnection } from "../.server/square/client";
+import {
+  getSquareConnection,
+  hasSquareScopes,
+} from "../.server/square/client";
 import { squareConnectionAction } from "../.server/square/connection-action";
+
+const PUBLISH_SCOPES = ["ITEMS_WRITE"] as const;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -20,6 +25,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           scopes: connection.scopes,
           expiresAt: connection.expiresAt.toISOString(),
           connectedAt: connection.createdAt.toISOString(),
+          needsReconnect: !hasSquareScopes(connection.scopes, PUBLISH_SCOPES),
         }
       : null,
   };
@@ -56,6 +62,12 @@ export default function Settings() {
       <s-section heading="Square connection">
         {connection ? (
           <s-stack direction="block" gap="base">
+            {connection.needsReconnect && (
+              <s-banner tone="warning">
+                Reconnect Square to approve catalog write access before using
+                Publish on Square.
+              </s-banner>
+            )}
             <s-paragraph>
               Connected to{" "}
               <s-text type="strong">
@@ -67,24 +79,36 @@ export default function Settings() {
               Scopes: {connection.scopes}. Access token auto-renews; current
               one expires {new Date(connection.expiresAt).toLocaleDateString()}.
             </s-paragraph>
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="disconnect" />
-              <s-button
-                type="submit"
-                variant="secondary"
-                tone="critical"
-                disabled={busy}
-              >
-                Disconnect Square
-              </s-button>
-            </fetcher.Form>
+            <s-stack direction="inline" gap="small">
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="connect" />
+                <s-button
+                  type="submit"
+                  variant={connection.needsReconnect ? "primary" : "secondary"}
+                  disabled={busy}
+                >
+                  Reconnect Square
+                </s-button>
+              </fetcher.Form>
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="disconnect" />
+                <s-button
+                  type="submit"
+                  variant="secondary"
+                  tone="critical"
+                  disabled={busy}
+                >
+                  Disconnect Square
+                </s-button>
+              </fetcher.Form>
+            </s-stack>
           </s-stack>
         ) : (
           <s-stack direction="block" gap="base">
             <s-paragraph>
               Connect your Square account so Skuweld can compare your Square
-              catalog and inventory with Shopify. You will be sent to Square to
-              approve read-only access.
+              catalog and inventory with Shopify, and publish approved Shopify
+              products into Square.
             </s-paragraph>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="connect" />

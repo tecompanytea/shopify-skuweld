@@ -1,0 +1,11 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "Publish on Square"
+handle = "publish-on-square"
+type = "ui_extension"
+uid = "d6492614-e953-63a3-fb21-905754842681a0d6c95e"
+
+[[extensions.targeting]]
+module = "./src/ProductAction.jsx"
+target = "admin.product-details.action.render"
