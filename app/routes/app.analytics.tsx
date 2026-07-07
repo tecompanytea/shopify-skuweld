@@ -728,18 +728,9 @@ export default function Analytics() {
     >
       {/* Title-bar actions are re-rendered by the admin host from a small
           {label, icon, disabled} payload — labeled buttons render natively,
-          icon-only ones don't, and only variant "secondary"/"auto" is allowed
-          in this slot. */}
+          icon-only ones don't. */}
       <s-button
-        slot="secondary-actions"
-        disabled={Boolean(override) || busy || !stale}
-        loading={busy}
-        onClick={refresh}
-      >
-        Refresh
-      </s-button>
-      <s-button
-        slot="secondary-actions"
+        slot="primary-action"
         disabled={exporting || lineCount === 0 || staleBlocksExport}
         loading={exporting}
         onClick={() => void exportXlsx()}
@@ -784,6 +775,13 @@ export default function Analytics() {
               setSearchParams(params);
             }}
           />
+          <s-button
+            disabled={Boolean(override) || busy || !stale}
+            loading={busy}
+            onClick={refresh}
+          >
+            Refresh
+          </s-button>
           {type !== "units-by-size" && (
             <ComparisonPicker
               compare={compare}
