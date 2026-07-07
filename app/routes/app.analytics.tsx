@@ -290,6 +290,41 @@ function compactDollars(cents: number): string {
   return `${sign}$${Math.round(abs)}`;
 }
 
+function moneyAxisLabel(cents: number): string {
+  const amount = cents / 100;
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1000) {
+    const thousands = abs / 1000;
+    const label = Number.isInteger(thousands)
+      ? thousands.toFixed(0)
+      : thousands.toFixed(1).replace(/\.0$/, "");
+    return `${sign}$${label}k`;
+  }
+  return `${sign}$${Math.round(abs)}`;
+}
+
+function niceStepCents(targetStepCents: number): number {
+  const targetDollars = Math.max(targetStepCents / 100, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(targetDollars));
+  const normalized = targetDollars / magnitude;
+  const multiplier =
+    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return multiplier * magnitude * 100;
+}
+
+function moneyAxisTicks(points: ChartPoint[]): number[] {
+  const maxValue = Math.max(
+    0,
+    ...points.flatMap((point) => [
+      Math.max(point.ty, 0),
+      Math.max(point.ly, 0),
+    ]),
+  );
+  const step = niceStepCents(maxValue / 3);
+  return [0, step, step * 2, step * 3];
+}
+
 function rangeLabel(range: { start: string; end: string }): string {
   if (range.start === range.end) return formatDay(range.start);
   const start = new Date(`${range.start}T12:00:00Z`);
@@ -415,6 +450,9 @@ function LineMetricCard({
   compact?: boolean;
   formatValue: (cents: number) => string;
 }) {
+  const yTicks = moneyAxisTicks(points);
+  const yMax = yTicks[yTicks.length - 1];
+
   return (
     <section
       className={`${styles.chartCard}${wide ? ` ${styles.wideChartCard}` : ""}`}
@@ -436,7 +474,7 @@ function LineMetricCard({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={points}
-              margin={{ top: 10, right: 18, bottom: 0, left: 0 }}
+              margin={{ top: 10, right: 18, bottom: 10, left: 0 }}
             >
               <CartesianGrid stroke="#ebedf0" vertical={false} />
               <XAxis
@@ -444,13 +482,16 @@ function LineMetricCard({
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: "#6d7175", fontSize: 12 }}
+                tickMargin={14}
                 minTickGap={24}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: "#6d7175", fontSize: 12 }}
-                tickFormatter={compactDollars}
+                tickFormatter={moneyAxisLabel}
+                ticks={yTicks}
+                domain={[0, yMax]}
                 width={54}
               />
               <Tooltip
@@ -464,9 +505,9 @@ function LineMetricCard({
                 name={currentLabel}
                 dataKey="ty"
                 stroke="#24a8df"
-                strokeWidth={3}
+                strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: "#24a8df" }}
+                activeDot={{ r: 3.5, strokeWidth: 0, fill: "#24a8df" }}
               />
               <Line
                 type="monotone"
@@ -474,9 +515,9 @@ function LineMetricCard({
                 dataKey="ly"
                 stroke="#9dccdf"
                 strokeDasharray="4 7"
-                strokeWidth={3}
+                strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: "#9dccdf" }}
+                activeDot={{ r: 3.5, strokeWidth: 0, fill: "#9dccdf" }}
               />
             </LineChart>
           </ResponsiveContainer>
