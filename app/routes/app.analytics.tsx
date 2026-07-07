@@ -335,9 +335,16 @@ function moneyAxisScale(points: ChartPoint[]): {
   };
 }
 
-function xAxisTicks(points: ChartPoint[]): string[] | undefined {
-  if (points.length < 28) return undefined;
-  const step = points.length <= 35 ? 3 : Math.ceil(points.length / 10);
+function xAxisTicks(
+  points: ChartPoint[],
+  chartWidth: number,
+): string[] | undefined {
+  if (points.length < 28 || chartWidth <= 0) return undefined;
+  const targetTickCount = Math.max(
+    3,
+    Math.min(10, Math.floor(chartWidth / 115)),
+  );
+  const step = Math.max(1, Math.ceil(points.length / targetTickCount));
   return points
     .filter((_, index) => index % step === 0)
     .map((point) => point.label);
@@ -583,7 +590,8 @@ function LineMetricCard({
   formatValue: (cents: number) => string;
 }) {
   const yAxis = moneyAxisScale(points);
-  const xTicks = xAxisTicks(points);
+  const [chartWidth, setChartWidth] = useState(0);
+  const xTicks = xAxisTicks(points, chartWidth);
 
   return (
     <section
@@ -601,7 +609,15 @@ function LineMetricCard({
       </div>
       <div className={wide ? styles.chartFrame : styles.miniChartFrame}>
         {ready ? (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            onResize={(width) =>
+              setChartWidth((current) =>
+                Math.abs(current - width) < 1 ? current : width,
+              )
+            }
+          >
             <LineChart
               data={points}
               margin={{ top: 10, right: 18, bottom: 10, left: 0 }}
@@ -633,7 +649,7 @@ function LineMetricCard({
                 )}
               />
               <Line
-                type="monotone"
+                type="natural"
                 name={currentLabel}
                 dataKey="ty"
                 stroke={CHART_CURRENT_COLOR}
@@ -646,7 +662,7 @@ function LineMetricCard({
                 }}
               />
               <Line
-                type="monotone"
+                type="natural"
                 name={comparisonLabel}
                 dataKey="ly"
                 stroke={CHART_COMPARISON_COLOR}
@@ -707,7 +723,7 @@ function SalesChannelCard({
               <PieChart>
                 <Tooltip
                   allowEscapeViewBox={{ x: true, y: true }}
-                  position={{ x: 118, y: 48 }}
+                  offset={12}
                   wrapperStyle={{ pointerEvents: "none", zIndex: 4 }}
                   content={(props) => <PieTooltip {...props} />}
                 />
