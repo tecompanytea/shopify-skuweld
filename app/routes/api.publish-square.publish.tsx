@@ -59,23 +59,26 @@ async function requestBody(request: Request) {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, admin } = await authenticate.admin(request);
+  const { session, admin, cors } = await authenticate.admin(request);
+  const errorJson = (message: string, status: number, code = "ERROR") =>
+    cors(jsonError(message, status, code));
+
   const body = await requestBody(request);
   if (!body.productId) {
-    return jsonError("Product ID is required", 400, "MISSING_PRODUCT_ID");
+    return errorJson("Product ID is required", 400, "MISSING_PRODUCT_ID");
   }
 
   try {
     const connection = await getSquareConnection(session.shop);
     if (!connection) {
-      return jsonError(
+      return errorJson(
         "Square is not connected. Connect Square in Settings first.",
         409,
         "SQUARE_NOT_CONNECTED",
       );
     }
     if (!hasSquareScopes(connection.scopes, PUBLISH_SCOPES)) {
-      return jsonError(
+      return errorJson(
         "Reconnect Square in Settings to grant catalog write access.",
         403,
         "SQUARE_RECONNECT_REQUIRED",
@@ -94,16 +97,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       uploadImage: body.overrides.uploadImage,
     });
 
-    return Response.json({ result });
+    return cors(Response.json({ result }));
   } catch (error) {
     if (error instanceof SquareNotConnectedError) {
-      return jsonError(error.message, 409, "SQUARE_NOT_CONNECTED");
+      return errorJson(error.message, 409, "SQUARE_NOT_CONNECTED");
     }
     if (error instanceof Response) {
-      return jsonError(await error.text(), error.status);
+      return errorJson(await error.text(), error.status);
     }
     console.error("Publish on Square failed", error);
-    return jsonError(
+    return errorJson(
       error instanceof Error ? error.message : "Publish failed",
       500,
     );
