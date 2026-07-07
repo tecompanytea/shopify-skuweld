@@ -776,6 +776,7 @@ export default function Analytics() {
             }}
           />
           <s-button
+            icon="refresh"
             disabled={Boolean(override) || busy || !stale}
             loading={busy}
             onClick={refresh}
