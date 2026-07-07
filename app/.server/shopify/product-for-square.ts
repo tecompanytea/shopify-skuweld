@@ -8,6 +8,7 @@ export interface ShopifyVariantForSquare {
 export interface ShopifyProductForSquare {
   id: string;
   title: string;
+  description: string | null;
   productType: string;
   status: string;
   currencyCode: string;
@@ -23,6 +24,7 @@ interface ProductForSquareQueryResult {
     product: {
       id: string;
       title: string;
+      description: string | null;
       productType: string;
       status: string;
       featuredMedia: {
@@ -54,6 +56,7 @@ const PRODUCT_FOR_SQUARE_QUERY = `#graphql
     product(id: $id) {
       id
       title
+      description
       productType
       status
       featuredMedia {
@@ -123,6 +126,7 @@ export async function getShopifyProductForSquare(
   return {
     id: product.id,
     title: product.title,
+    description: product.description ?? null,
     productType: product.productType,
     status: product.status,
     currencyCode: json.data?.shop.currencyCode ?? "USD",

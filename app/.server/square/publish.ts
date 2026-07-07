@@ -6,14 +6,28 @@ import {
   listSquareCatalogObjects,
   listSquareCategories,
   listSquareProducts,
+  listSquareTaxes,
   type CatalogObject,
   type SquareCategory,
   type SquareProductRow,
+  type SquareTax,
 } from "./catalog";
 import { squareFetch, squareFetchForm } from "./client";
 
 const SQUARE_STRING_LIMIT = 255;
+const SQUARE_DESCRIPTION_LIMIT = 65_535;
 const SQUARE_IMAGE_LIMIT_BYTES = 15 * 1024 * 1024;
+const CATEGORY_BLOCKER = "Choose at least one Square category";
+const DEFAULT_SQUARE_PRODUCT_TYPE = "FOOD_AND_BEV";
+
+const SQUARE_PRODUCT_TYPES = new Set([
+  "FOOD_AND_BEV",
+  "REGULAR",
+  "EVENT",
+  "DONATION",
+  "DIGITAL",
+  "LEGACY_SQUARE_ONLINE_SERVICE",
+]);
 
 type SkuCheckStatus =
   | "ready"
@@ -36,6 +50,7 @@ export interface PublishPreview {
   product: {
     id: string;
     title: string;
+    description: string | null;
     productType: string | null;
     status: string;
     imageUrl: string | null;
@@ -45,8 +60,11 @@ export interface PublishPreview {
     flavorNotes: string | null;
   };
   categories: SquareCategory[];
-  suggestedCategoryId: string | null;
+  taxes: SquareTax[];
+  suggestedCategoryIds: string[];
   suggestedCategoryName: string | null;
+  suggestedTaxIds: string[];
+  suggestedProductType: string;
   skuChecks: PublishSkuCheck[];
   notices: string[];
   blockers: string[];
@@ -67,9 +85,8 @@ interface CreateCatalogImageResponse {
 }
 
 interface CategoryResolution {
-  id: string;
-  name: string;
-  object: CatalogObject | null;
+  categories: Array<{ id: string; name: string }>;
+  objects: CatalogObject[];
 }
 
 interface CustomAttributeDefinition {
@@ -80,8 +97,10 @@ interface CustomAttributeDefinition {
 }
 
 interface PublishInput {
-  categoryId?: string | null;
+  categoryIds?: string[];
   createCategoryName?: string | null;
+  taxIds?: string[];
+  productType?: string | null;
   uploadImage?: boolean;
 }
 
@@ -94,6 +113,8 @@ export interface PublishVariantOverride {
 
 export interface PublishOverrides {
   itemName?: string | null;
+  description?: string | null;
+  productType?: string | null;
   chineseName?: string | null;
   flavorNotes?: string | null;
   uploadImage?: boolean;
@@ -104,6 +125,9 @@ export interface PublishResult {
   itemId: string;
   itemName: string;
   categoryName: string;
+  categoryNames: string[];
+  taxNames: string[];
+  productType: string;
   variationCount: number;
   image: {
     uploaded: boolean;
@@ -139,6 +163,20 @@ function suggestedCategory(
   return { id: match?.id ?? null, name };
 }
 
+function suggestedTaxes(taxes: SquareTax[]): string[] {
+  const enabledTaxes = taxes.filter((tax) => tax.enabled);
+  const nycTax = enabledTaxes.find((tax) => {
+    const name = tax.name.toLowerCase();
+    return (
+      name.includes("nyc") ||
+      name.includes("new york") ||
+      tax.percentage === "8.875"
+    );
+  });
+  if (nycTax) return [nycTax.id];
+  return enabledTaxes.length === 1 ? [enabledTaxes[0].id] : [];
+}
+
 function parsePriceCents(price: string): number | null {
   const match = price.trim().match(/^(\d+)(?:\.(\d{1,}))?$/);
   if (!match) return null;
@@ -164,10 +202,43 @@ function squareString(value: string): string {
   return `${chars.slice(0, SQUARE_STRING_LIMIT - 3).join("")}...`;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function squareDescriptionHtml(value: string | null): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return trimmed
+    .split(/\n{2,}/)
+    .map((paragraph) => {
+      const body = escapeHtml(paragraph.trim()).replace(/\n/g, "<br />");
+      return body ? `<p>${body}</p>` : "";
+    })
+    .filter((paragraph) => paragraph)
+    .join("");
+}
+
+function descriptionLength(value: string | null): number {
+  return squareDescriptionHtml(value)?.length ?? 0;
+}
+
 function nullableString(value: unknown): string | null | undefined {
   if (value === null) return null;
   if (typeof value === "string") return value;
   return undefined;
+}
+
+function normalizeSquareProductType(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return SQUARE_PRODUCT_TYPES.has(trimmed) ? trimmed : undefined;
 }
 
 export function normalizePublishOverrides(raw: unknown): PublishOverrides {
@@ -177,6 +248,10 @@ export function normalizePublishOverrides(raw: unknown): PublishOverrides {
 
   const itemName = nullableString(input.itemName);
   if (itemName !== undefined) overrides.itemName = itemName;
+  const description = nullableString(input.description);
+  if (description !== undefined) overrides.description = description;
+  const productType = normalizeSquareProductType(input.productType);
+  if (productType !== undefined) overrides.productType = productType;
   const chineseName = nullableString(input.chineseName);
   if (chineseName !== undefined) overrides.chineseName = chineseName;
   const flavorNotes = nullableString(input.flavorNotes);
@@ -230,6 +305,10 @@ export function applyPublishOverrides(
       overrides.itemName === undefined
         ? product.title
         : (overrides.itemName ?? "").trim(),
+    description:
+      overrides.description === undefined
+        ? product.description
+        : cleanNullableText(overrides.description),
     chineseName:
       overrides.chineseName === undefined
         ? product.chineseName
@@ -356,11 +435,18 @@ export function buildSkuChecks(
   });
 }
 
-function buildNotices(product: ShopifyProductForSquare): string[] {
-  const notices = [
-    "Initial inventory is not set by this action.",
-    "Review taxes in Square after publishing.",
-  ];
+function buildNotices(
+  product: ShopifyProductForSquare,
+  taxes: SquareTax[],
+  taxIds: string[],
+): string[] {
+  const notices = ["Initial inventory is not set by this action."];
+
+  if (taxes.length === 0) {
+    notices.push("No Square taxes were found for this account.");
+  } else if (taxIds.length === 0) {
+    notices.push("No Square tax is selected for this item.");
+  }
 
   for (const attribute of CUSTOM_ATTRIBUTES) {
     const value = product[attribute.productField];
@@ -376,14 +462,17 @@ function buildNotices(product: ShopifyProductForSquare): string[] {
 
 function blockersFor(
   skuChecks: PublishSkuCheck[],
-  categoryId: string | null,
+  categoryIds: string[],
   product: ShopifyProductForSquare,
 ): string[] {
   const blockers = skuChecks
     .filter((check) => check.status !== "ready")
     .map((check) => check.message);
   if (!product.title.trim()) blockers.push("Square item name is required");
-  if (!categoryId) blockers.push("Choose or create a Square category");
+  if (descriptionLength(product.description) > SQUARE_DESCRIPTION_LIMIT) {
+    blockers.push("Customer-facing description is too long for Square");
+  }
+  if (categoryIds.length === 0) blockers.push(CATEGORY_BLOCKER);
   return Array.from(new Set(blockers));
 }
 
@@ -391,17 +480,21 @@ export async function buildPublishPreview(
   shop: string,
   product: ShopifyProductForSquare,
 ): Promise<PublishPreview> {
-  const [categories, squareRows] = await Promise.all([
+  const [categories, taxes, squareRows] = await Promise.all([
     listSquareCategories(shop),
+    listSquareTaxes(shop),
     listSquareProducts(shop),
   ]);
   const category = suggestedCategory(categories, product.productType);
+  const categoryIds = category.id ? [category.id] : [];
+  const taxIds = suggestedTaxes(taxes);
   const skuChecks = buildSkuChecks(product, squareRows);
 
   return {
     product: {
       id: product.id,
       title: product.title,
+      description: product.description,
       productType: product.productType.trim() || null,
       status: product.status,
       imageUrl: product.featuredImageUrl,
@@ -411,44 +504,100 @@ export async function buildPublishPreview(
       flavorNotes: product.flavorNotes,
     },
     categories,
-    suggestedCategoryId: category.id,
+    taxes,
+    suggestedCategoryIds: categoryIds,
     suggestedCategoryName: category.name,
+    suggestedTaxIds: taxIds,
+    suggestedProductType: DEFAULT_SQUARE_PRODUCT_TYPE,
     skuChecks,
-    notices: buildNotices(product),
-    blockers: blockersFor(skuChecks, category.id, product),
+    notices: buildNotices(product, taxes, taxIds),
+    blockers: blockersFor(skuChecks, categoryIds, product),
   };
 }
 
-async function resolveCategory(
+function uniqueStrings(values: string[] | undefined): string[] {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  );
+}
+
+async function resolveCategories(
   shop: string,
   input: PublishInput,
 ): Promise<CategoryResolution> {
   const categories = await listSquareCategories(shop);
   const createName = input.createCategoryName?.trim();
+  const requestedCategoryIds = uniqueStrings(input.categoryIds);
+  const resolvedCategories: Array<{ id: string; name: string }> = [];
+  const objects: CatalogObject[] = [];
+
+  for (const id of requestedCategoryIds) {
+    const category = categories.find((item) => item.id === id);
+    if (!category) {
+      throw new Response("Choose valid Square categories", { status: 422 });
+    }
+    resolvedCategories.push({ id: category.id, name: category.name });
+  }
 
   if (createName) {
     const existing = categories.find((category) =>
       sameName(category.name, createName),
     );
-    if (existing) return { id: existing.id, name: existing.name, object: null };
-
-    const id = `#skuweld-category-${crypto.randomUUID()}`;
-    return {
-      id,
-      name: squareString(createName),
-      object: {
+    if (existing) {
+      if (!resolvedCategories.some((category) => category.id === existing.id)) {
+        resolvedCategories.push({ id: existing.id, name: existing.name });
+      }
+    } else {
+      const id = `#skuweld-category-${crypto.randomUUID()}`;
+      const name = squareString(createName);
+      resolvedCategories.push({ id, name });
+      objects.push({
         type: "CATEGORY",
         id,
-        category_data: { name: squareString(createName) },
-      },
-    };
+        category_data: { name },
+      });
+    }
   }
 
-  const category = categories.find((item) => item.id === input.categoryId);
-  if (!category) {
-    throw new Response("Choose a valid Square category", { status: 422 });
+  if (resolvedCategories.length === 0) {
+    throw new Response(CATEGORY_BLOCKER, { status: 422 });
   }
-  return { id: category.id, name: category.name, object: null };
+
+  return { categories: resolvedCategories, objects };
+}
+
+async function resolveTaxes(
+  shop: string,
+  input: PublishInput,
+): Promise<{ taxIds: string[]; taxNames: string[] }> {
+  const requestedTaxIds = uniqueStrings(input.taxIds);
+  if (requestedTaxIds.length === 0) return { taxIds: [], taxNames: [] };
+
+  const taxes = await listSquareTaxes(shop);
+  const taxNames: string[] = [];
+  for (const id of requestedTaxIds) {
+    const tax = taxes.find((item) => item.id === id);
+    if (!tax) {
+      throw new Response("Choose valid Square taxes", { status: 422 });
+    }
+    taxNames.push(
+      tax.percentage ? `${tax.name} (${tax.percentage}%)` : tax.name,
+    );
+  }
+
+  return { taxIds: requestedTaxIds, taxNames };
+}
+
+function publishProductType(input: PublishInput): string {
+  const type = input.productType?.trim() || DEFAULT_SQUARE_PRODUCT_TYPE;
+  if (!SQUARE_PRODUCT_TYPES.has(type)) {
+    throw new Response("Choose a valid Square item type", { status: 422 });
+  }
+  return type;
 }
 
 function mapResponseId(
@@ -632,18 +781,25 @@ export async function publishProductToSquare(
   product: ShopifyProductForSquare,
   input: PublishInput,
 ): Promise<PublishResult> {
-  const [category, squareRows, definitions] = await Promise.all([
-    resolveCategory(shop, input),
-    listSquareProducts(shop),
-    customAttributeDefinitions(shop, product),
-  ]);
+  const [categoryResolution, taxResolution, squareRows, definitions] =
+    await Promise.all([
+      resolveCategories(shop, input),
+      resolveTaxes(shop, input),
+      listSquareProducts(shop),
+      customAttributeDefinitions(shop, product),
+    ]);
+  const productType = publishProductType(input);
+  const categoryIds = categoryResolution.categories.map(
+    (category) => category.id,
+  );
   const skuChecks = buildSkuChecks(product, squareRows);
-  const blockers = blockersFor(skuChecks, category.id, product);
+  const blockers = blockersFor(skuChecks, categoryIds, product);
   if (blockers.length > 0) {
     throw new Response(blockers.join("\n"), { status: 422 });
   }
 
   const itemId = `#skuweld-item-${crypto.randomUUID()}`;
+  const descriptionHtml = squareDescriptionHtml(product.description);
   const definitionObjects = definitions
     .map((definition) => definition.object)
     .filter((object): object is CatalogObject => Boolean(object));
@@ -673,19 +829,20 @@ export async function publishProductToSquare(
     present_at_all_locations: true,
     item_data: {
       name: squareString(product.title),
-      product_type: "REGULAR",
-      categories: [{ id: category.id }],
-      reporting_category: { id: category.id },
+      ...(descriptionHtml ? { description_html: descriptionHtml } : {}),
+      product_type: productType,
+      categories: categoryIds.map((id) => ({ id })),
+      reporting_category: { id: categoryIds[0] },
+      is_taxable: taxResolution.taxIds.length > 0,
+      ...(taxResolution.taxIds.length > 0
+        ? { tax_ids: taxResolution.taxIds }
+        : {}),
       variations: variationObjects,
     },
     custom_attribute_values: itemCustomAttributeValues(product, definitions),
   };
 
-  const objects = [
-    ...definitionObjects,
-    ...(category.object ? [category.object] : []),
-    item,
-  ];
+  const objects = [...definitionObjects, ...categoryResolution.objects, item];
 
   const data = await squareFetch<BatchUpsertCatalogObjectsResponse>(
     shop,
@@ -717,7 +874,12 @@ export async function publishProductToSquare(
       return {
         itemId: createdItemId,
         itemName: product.title,
-        categoryName: category.name,
+        categoryName: categoryResolution.categories[0].name,
+        categoryNames: categoryResolution.categories.map(
+          (category) => category.name,
+        ),
+        taxNames: taxResolution.taxNames,
+        productType,
         variationCount: product.variants.length,
         image,
       };
@@ -737,7 +899,10 @@ export async function publishProductToSquare(
   return {
     itemId: createdItemId,
     itemName: product.title,
-    categoryName: category.name,
+    categoryName: categoryResolution.categories[0].name,
+    categoryNames: categoryResolution.categories.map((category) => category.name),
+    taxNames: taxResolution.taxNames,
+    productType,
     variationCount: product.variants.length,
     image,
   };

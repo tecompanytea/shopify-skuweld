@@ -25,6 +25,8 @@ export interface CatalogObject {
     name?: string;
     description_html?: string;
     product_type?: string;
+    is_taxable?: boolean;
+    tax_ids?: string[];
     image_ids?: string[];
     categories?: Array<{ id: string }>;
     reporting_category?: { id: string };
@@ -45,6 +47,14 @@ export interface CatalogObject {
   };
   category_data?: {
     name?: string;
+    category_type?: string;
+  };
+  tax_data?: {
+    name?: string;
+    percentage?: string;
+    enabled?: boolean;
+    calculation_phase?: string;
+    inclusion_type?: string;
   };
   custom_attribute_definition_data?: {
     type?: string;
@@ -74,6 +84,13 @@ export interface SquareProductRow {
 export interface SquareCategory {
   id: string;
   name: string;
+}
+
+export interface SquareTax {
+  id: string;
+  name: string;
+  percentage: string | null;
+  enabled: boolean;
 }
 
 export async function listSquareCatalogObjects(
@@ -108,6 +125,22 @@ export async function listSquareCategories(
       name: object.category_data!.name!,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function listSquareTaxes(shop: string): Promise<SquareTax[]> {
+  const objects = await listSquareCatalogObjects(shop, "TAX");
+  return objects
+    .filter((object) => object.type === "TAX" && object.tax_data?.name)
+    .map((object) => ({
+      id: object.id,
+      name: object.tax_data!.name!,
+      percentage: object.tax_data?.percentage ?? null,
+      enabled: object.tax_data?.enabled ?? false,
+    }))
+    .sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 function customAttribute(object: CatalogObject, name: string): string | null {

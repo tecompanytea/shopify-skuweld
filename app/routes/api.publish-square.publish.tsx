@@ -17,8 +17,10 @@ const PUBLISH_SCOPES = ["ITEMS_WRITE"] as const;
 
 interface PublishBody {
   productId?: unknown;
-  categoryId?: unknown;
+  categoryIds?: unknown;
   createCategoryName?: unknown;
+  taxIds?: unknown;
+  productType?: unknown;
   overrides?: unknown;
 }
 
@@ -28,19 +30,29 @@ function jsonError(message: string, status: number, code = "ERROR") {
 
 async function requestBody(request: Request) {
   const body = (await request.json().catch(() => null)) as PublishBody | null;
+  const categoryIds = Array.isArray(body?.categoryIds)
+    ? body.categoryIds.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  const taxIds = Array.isArray(body?.taxIds)
+    ? body.taxIds.filter((value): value is string => typeof value === "string")
+    : [];
   return {
     productId:
       typeof body?.productId === "string" && body.productId.trim()
         ? body.productId
         : null,
-    categoryId:
-      typeof body?.categoryId === "string" && body.categoryId.trim()
-        ? body.categoryId
-        : null,
+    categoryIds,
     createCategoryName:
       typeof body?.createCategoryName === "string" &&
       body.createCategoryName.trim()
         ? body.createCategoryName
+        : null,
+    taxIds,
+    productType:
+      typeof body?.productType === "string" && body.productType.trim()
+        ? body.productType
         : null,
     overrides: normalizePublishOverrides(body?.overrides),
   };
@@ -75,8 +87,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       body.overrides,
     );
     const result = await publishProductToSquare(session.shop, product, {
-      categoryId: body.categoryId,
+      categoryIds: body.categoryIds,
       createCategoryName: body.createCategoryName,
+      taxIds: body.taxIds,
+      productType: body.productType ?? body.overrides.productType,
       uploadImage: body.overrides.uploadImage,
     });
 
