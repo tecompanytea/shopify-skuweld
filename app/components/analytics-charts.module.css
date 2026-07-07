@@ -191,7 +191,7 @@
   inline-size: 8px;
   block-size: 8px;
   border-radius: 999px;
-  background: #13acf0;
+  background: rgb(19, 172, 240);
 }
 
 .comparisonDot {
@@ -324,7 +324,7 @@
 .barFill {
   block-size: 100%;
   border-radius: inherit;
-  background: #23a8df;
+  background: rgb(19, 172, 240);
 }
 
 .comparisonBarTrack {
@@ -333,7 +333,7 @@
 }
 
 .comparisonBarFill {
-  background: #93cce6;
+  background: rgba(10, 151, 213, 0.5);
 }
 
 .barAmount {

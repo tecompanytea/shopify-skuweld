@@ -90,6 +90,8 @@ const SYNC_SOURCE_LABELS: Record<string, string> = {
   "square-orders": "Square",
   "shopify-orders": "Shopify",
 };
+const CHART_CURRENT_COLOR = "rgb(19, 172, 240)";
+const CHART_COMPARISON_COLOR = "rgba(10, 151, 213, 0.5)";
 // A pull that hasn't written progress for this long is treated as stalled —
 // i.e. the background function was killed (e.g. hit maxDuration). It surfaces
 // as a message instead of an endless spinner.
@@ -449,7 +451,7 @@ function MoneyTooltip({
           {
             name: String(entry.name ?? ""),
             value: entry.value,
-            color: entry.color ?? "#24a8df",
+            color: entry.color ?? CHART_CURRENT_COLOR,
           },
         ]
       : [],
@@ -542,7 +544,7 @@ function LineMetricCard({
                 width={54}
               />
               <Tooltip
-                cursor={{ stroke: "#c8e4f2", strokeWidth: 1 }}
+                cursor={{ stroke: CHART_COMPARISON_COLOR, strokeWidth: 1 }}
                 content={(props) => (
                   <MoneyTooltip {...props} formatValue={formatValue} />
                 )}
@@ -551,20 +553,28 @@ function LineMetricCard({
                 type="monotone"
                 name={currentLabel}
                 dataKey="ty"
-                stroke="#24a8df"
+                stroke={CHART_CURRENT_COLOR}
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 3.5, strokeWidth: 0, fill: "#24a8df" }}
+                activeDot={{
+                  r: 3.5,
+                  strokeWidth: 0,
+                  fill: CHART_CURRENT_COLOR,
+                }}
               />
               <Line
                 type="monotone"
                 name={comparisonLabel}
                 dataKey="ly"
-                stroke="#9dccdf"
+                stroke={CHART_COMPARISON_COLOR}
                 strokeDasharray="4 7"
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 3.5, strokeWidth: 0, fill: "#9dccdf" }}
+                activeDot={{
+                  r: 3.5,
+                  strokeWidth: 0,
+                  fill: CHART_COMPARISON_COLOR,
+                }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -578,7 +588,7 @@ function LineMetricCard({
 }
 
 const CHANNEL_COLORS: Record<string, string> = {
-  ECOM: "#24a8df",
+  ECOM: CHART_CURRENT_COLOR,
   WV: "#77b7d7",
   EV: "#b8c8f2",
   INVOICED: "#efb6dc",
@@ -598,7 +608,7 @@ function SalesChannelCard({
     value: row.ty,
     color:
       CHANNEL_COLORS[row.channel] ??
-      ["#24a8df", "#77b7d7", "#b8c8f2", "#efb6dc"][index % 4],
+      [CHART_CURRENT_COLOR, "#77b7d7", "#b8c8f2", "#efb6dc"][index % 4],
   }));
 
   return (
@@ -655,7 +665,8 @@ function SalesChannelCard({
                 <span
                   className={styles.channelSwatch}
                   style={{
-                    background: CHANNEL_COLORS[row.channel] ?? "#9dccdf",
+                    background:
+                      CHANNEL_COLORS[row.channel] ?? CHART_COMPARISON_COLOR,
                   }}
                 />
                 <span className={styles.channelText}>{row.label}</span>
