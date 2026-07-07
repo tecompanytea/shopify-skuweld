@@ -597,7 +597,7 @@ function ProductBars({ rows }: { rows: ProductChartRow[] }) {
               {row.category ? `${row.name} · ${row.category}` : row.name}
             </div>
             <div className={styles.productBarRow}>
-              <div>
+              <div className={styles.productBarStack}>
                 <div className={styles.barTrack}>
                   <div className={styles.barFill} style={{ width: tyWidth }} />
                 </div>
@@ -1293,8 +1293,6 @@ export default function Analytics() {
         </s-stack>
       </s-section>
 
-      {charts && <AnalyticsCharts charts={charts} />}
-
       {weekly ? (
         // One card, three tabs. The tables have different column counts
         // (channel / category / distribution); a segmented tab bar keeps each
@@ -1354,6 +1352,8 @@ export default function Analytics() {
           )}
         </TableCard>
       )}
+
+      {charts && <AnalyticsCharts charts={charts} />}
     </s-page>
   );
 }
