@@ -224,8 +224,12 @@ function SortableHeaderLabel({
 
 export function GroupedProductTable({
   products,
+  onPublishProduct,
+  publishModalId,
 }: {
   products: ProductGroup[];
+  onPublishProduct?: (product: ProductGroup) => void;
+  publishModalId?: string;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -308,6 +312,9 @@ export function GroupedProductTable({
     visible.every((product) => selected.has(product.id));
   const someVisibleSelected =
     !allVisibleSelected && visible.some((product) => selected.has(product.id));
+  const selectedProducts = products.filter((product) =>
+    selected.has(product.id),
+  );
 
   const directionLabels = sortFieldConfig(sort.field).directionLabels;
 
@@ -328,12 +335,28 @@ export function GroupedProductTable({
         >
           <s-grid gridTemplateColumns="1fr auto" alignItems="center">
             <s-text type="strong">{`${selected.size} selected`}</s-text>
-            <s-button
-              variant="secondary"
-              onClick={() => setSelected(new Set())}
-            >
-              Clear
-            </s-button>
+            <s-stack direction="inline" gap="small" alignItems="center">
+              {onPublishProduct && publishModalId && (
+                <s-button
+                  variant="primary"
+                  disabled={selectedProducts.length !== 1}
+                  commandFor={publishModalId}
+                  command="--show"
+                  onClick={() => {
+                    const product = selectedProducts[0];
+                    if (product) onPublishProduct(product);
+                  }}
+                >
+                  Publish on Square
+                </s-button>
+              )}
+              <s-button
+                variant="secondary"
+                onClick={() => setSelected(new Set())}
+              >
+                Clear
+              </s-button>
+            </s-stack>
           </s-grid>
         </s-box>
       ) : (
