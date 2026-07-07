@@ -375,11 +375,36 @@ function ChangeLabel({
     );
   }
   const positive = metric.changePct >= 0;
+  const percent = Math.round(Math.abs(metric.changePct * 100) * 10) / 10;
+  const percentLabel =
+    percent < 10 && !Number.isInteger(percent)
+      ? percent.toFixed(1)
+      : percent.toFixed(0);
+  const title = `${positive ? "Increase" : "Decrease"} of ${percentLabel}%`;
   return (
     <span
       className={`${styles.changeValue}${positive ? "" : ` ${styles.changeNegative}`}`}
+      title={title}
     >
-      {`${positive ? "▲" : "▼"} ${Math.abs(metric.changePct * 100).toFixed(0)}%`}
+      <svg
+        viewBox="0 0 6 6"
+        width="6"
+        height="6"
+        aria-hidden="true"
+        className={styles.trendIcon}
+      >
+        <path
+          fill="currentColor"
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d={
+            positive
+              ? "M1 .25a.75.75 0 1 0 0 1.5h2.19L.594 4.345a.75.75 0 0 0 1.06 1.06L4.25 2.811V5a.75.75 0 0 0 1.5 0V1A.748.748 0 0 0 5 .25H1Z"
+              : "M5.75 1a.75.75 0 0 0-1.5 0v2.19L1.655.594a.75.75 0 1 0-1.06 1.06L3.189 4.25H1a.75.75 0 0 0 0 1.5h4a.748.748 0 0 0 .529-.218l.001-.002.002-.001A.748.748 0 0 0 5.75 5V1Z"
+          }
+        />
+      </svg>
+      <span>{percentLabel}%</span>
     </span>
   );
 }
@@ -394,12 +419,16 @@ function ChartLegend({
   return (
     <div className={styles.legend}>
       <span className={styles.legendItem}>
-        <span className={styles.legendDot} />
-        {current}
+        <span className={styles.legendIcon}>
+          <span className={styles.legendDot} />
+        </span>
+        <span className={styles.legendText}>{current}</span>
       </span>
       <span className={styles.legendItem}>
-        <span className={`${styles.legendDot} ${styles.comparisonDot}`} />
-        {comparison}
+        <span className={styles.legendIcon}>
+          <span className={`${styles.legendDot} ${styles.comparisonDot}`} />
+        </span>
+        <span className={styles.legendText}>{comparison}</span>
       </span>
     </div>
   );
