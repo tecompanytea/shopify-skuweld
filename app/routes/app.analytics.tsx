@@ -1,4 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  Cell,
+  CartesianGrid,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type TooltipContentProps,
+} from "recharts";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -26,6 +39,12 @@ import {
 } from "../.server/analytics/request";
 import { evaluateFreshness } from "../.server/analytics/freshness";
 import {
+  computeAnalyticsChartSummary,
+  type AnalyticsChartSummary,
+  type ChartPoint,
+  type ProductChartRow,
+} from "../.server/analytics/chart-summary";
+import {
   computeWeeklyReport,
   type CellPair,
   type ChannelCells,
@@ -44,9 +63,10 @@ import {
   type UnitsBySizeReport,
 } from "../.server/analytics/units-by-size-report";
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
-import { toReportDay } from "../lib/periods";
+import { formatDay, toReportDay } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
 import { ComparisonPicker } from "../components/comparison-picker";
+import styles from "../components/analytics-charts.module.css";
 
 // Human "last refreshed" label for the freshness line under the report.
 function refreshedLabel(at: Date, now: number): string {
@@ -145,24 +165,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : null;
   const sync = summarizeSync(shop, syncStates, now);
 
+  let charts: AnalyticsChartSummary | null = null;
   let weekly: WeeklyReport | null = null;
   let productSelling: ProductSellingReport | null = null;
   let top10: Top10Report | null = null;
   let unitsBySize: UnitsBySizeReport | null = null;
   if (lineCount > 0) {
     if (type === "weekly") {
-      weekly = await computeWeeklyReport(shop, range, compare);
+      [charts, weekly] = await Promise.all([
+        computeAnalyticsChartSummary(shop, range, compare),
+        computeWeeklyReport(shop, range, compare),
+      ]);
     } else if (type.startsWith("product-")) {
-      productSelling = await computeProductSellingReport(
-        shop,
-        type.slice("product-".length),
-        range,
-        compare,
-      );
+      [charts, productSelling] = await Promise.all([
+        computeAnalyticsChartSummary(shop, range, compare),
+        computeProductSellingReport(
+          shop,
+          type.slice("product-".length),
+          range,
+          compare,
+        ),
+      ]);
     } else if (type === "top10") {
-      top10 = await computeTop10Report(shop, range, compare);
+      [charts, top10] = await Promise.all([
+        computeAnalyticsChartSummary(shop, range, compare),
+        computeTop10Report(shop, range, compare),
+      ]);
     } else if (type === "units-by-size") {
-      unitsBySize = await computeUnitsBySizeReport(shop, range);
+      [charts, unitsBySize] = await Promise.all([
+        computeAnalyticsChartSummary(shop, range, compare),
+        computeUnitsBySizeReport(shop, range),
+      ]);
     }
   }
 
@@ -177,6 +210,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     historical,
     lastSyncedLabel,
     override,
+    charts,
     weekly,
     productSelling,
     top10,
@@ -235,6 +269,398 @@ function dollars(cents: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+}
+
+function preciseDollars(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function compactDollars(cents: number): string {
+  const amount = cents / 100;
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? "-" : "";
+  if (abs >= 1000) {
+    return `${sign}$${Math.round(abs / 1000)}K`;
+  }
+  return `${sign}$${Math.round(abs)}`;
+}
+
+function rangeLabel(range: { start: string; end: string }): string {
+  if (range.start === range.end) return formatDay(range.start);
+  const start = new Date(`${range.start}T12:00:00Z`);
+  const end = new Date(`${range.end}T12:00:00Z`);
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear();
+  const sameMonth = sameYear && start.getUTCMonth() === end.getUTCMonth();
+  const startMonth = start.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+  const endMonth = end.toLocaleDateString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+  });
+  if (sameMonth) {
+    return `${startMonth} ${start.getUTCDate()}-${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+  }
+  if (sameYear) {
+    return `${startMonth} ${start.getUTCDate()}-${endMonth} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+  }
+  return `${formatDay(range.start)} - ${formatDay(range.end)}`;
+}
+
+function ChangeLabel({
+  metric,
+}: {
+  metric: { ty: number; ly: number; changePct: number | null };
+}) {
+  if (metric.changePct === null) {
+    return metric.ty === 0 ? null : (
+      <span className={styles.changeValue}>New</span>
+    );
+  }
+  const positive = metric.changePct >= 0;
+  return (
+    <span
+      className={`${styles.changeValue}${positive ? "" : ` ${styles.changeNegative}`}`}
+    >
+      {`${positive ? "▲" : "▼"} ${Math.abs(metric.changePct * 100).toFixed(0)}%`}
+    </span>
+  );
+}
+
+function ChartLegend({
+  current,
+  comparison,
+}: {
+  current: string;
+  comparison: string;
+}) {
+  return (
+    <div className={styles.legend}>
+      <span className={styles.legendItem}>
+        <span className={styles.legendDot} />
+        {current}
+      </span>
+      <span className={styles.legendItem}>
+        <span className={`${styles.legendDot} ${styles.comparisonDot}`} />
+        {comparison}
+      </span>
+    </div>
+  );
+}
+
+function MoneyTooltip({
+  active,
+  payload,
+  label,
+  formatValue,
+}: TooltipContentProps & {
+  formatValue: (cents: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  const rows = payload.flatMap((entry) =>
+    typeof entry.value === "number"
+      ? [
+          {
+            name: String(entry.name ?? ""),
+            value: entry.value,
+            color: entry.color ?? "#24a8df",
+          },
+        ]
+      : [],
+  );
+  if (rows.length === 0) return null;
+  return (
+    <div className={styles.tooltip}>
+      <div className={styles.tooltipLabel}>{label}</div>
+      {rows.map((row) => (
+        <div className={styles.tooltipRow} key={row.name}>
+          <span className={styles.tooltipName}>
+            <span
+              className={styles.tooltipSwatch}
+              style={{ background: row.color }}
+            />
+            {row.name}
+          </span>
+          <span className={styles.tooltipAmount}>{formatValue(row.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LineMetricCard({
+  title,
+  metric,
+  points,
+  currentLabel,
+  comparisonLabel,
+  ready,
+  wide = false,
+  compact = false,
+  formatValue,
+}: {
+  title: string;
+  metric: { ty: number; ly: number; changePct: number | null };
+  points: ChartPoint[];
+  currentLabel: string;
+  comparisonLabel: string;
+  ready: boolean;
+  wide?: boolean;
+  compact?: boolean;
+  formatValue: (cents: number) => string;
+}) {
+  return (
+    <section
+      className={`${styles.chartCard}${wide ? ` ${styles.wideChartCard}` : ""}`}
+      aria-label={title}
+    >
+      <div className={styles.chartHeader}>
+        <h2 className={styles.chartTitle}>{title}</h2>
+      </div>
+      <div className={styles.metricRow}>
+        <span
+          className={`${styles.metricValue}${compact ? ` ${styles.smallMetricValue}` : ""}`}
+        >
+          {formatValue(metric.ty)}
+        </span>
+        <ChangeLabel metric={metric} />
+      </div>
+      <div className={wide ? styles.chartFrame : styles.miniChartFrame}>
+        {ready ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+              data={points}
+              margin={{ top: 10, right: 18, bottom: 0, left: 0 }}
+            >
+              <CartesianGrid stroke="#ebedf0" vertical={false} />
+              <XAxis
+                dataKey="label"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#6d7175", fontSize: 12 }}
+                minTickGap={24}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#6d7175", fontSize: 12 }}
+                tickFormatter={compactDollars}
+                width={54}
+              />
+              <Tooltip
+                cursor={{ stroke: "#c8e4f2", strokeWidth: 1 }}
+                content={(props) => (
+                  <MoneyTooltip {...props} formatValue={formatValue} />
+                )}
+              />
+              <Line
+                type="monotone"
+                name={currentLabel}
+                dataKey="ty"
+                stroke="#24a8df"
+                strokeWidth={3}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0, fill: "#24a8df" }}
+              />
+              <Line
+                type="monotone"
+                name={comparisonLabel}
+                dataKey="ly"
+                stroke="#9dccdf"
+                strokeDasharray="4 7"
+                strokeWidth={3}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0, fill: "#9dccdf" }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className={styles.chartPlaceholder} />
+        )}
+      </div>
+      <ChartLegend current={currentLabel} comparison={comparisonLabel} />
+    </section>
+  );
+}
+
+const CHANNEL_COLORS: Record<string, string> = {
+  ECOM: "#24a8df",
+  WV: "#77b7d7",
+  EV: "#b8c8f2",
+  INVOICED: "#efb6dc",
+};
+
+function SalesChannelCard({
+  charts,
+  ready,
+}: {
+  charts: AnalyticsChartSummary;
+  ready: boolean;
+}) {
+  const positiveRows = charts.salesByChannel.filter((row) => row.ty > 0);
+  const topChannel = charts.salesByChannel[0];
+  const pieRows = positiveRows.map((row, index) => ({
+    name: row.label,
+    value: row.ty,
+    color:
+      CHANNEL_COLORS[row.channel] ??
+      ["#24a8df", "#77b7d7", "#b8c8f2", "#efb6dc"][index % 4],
+  }));
+
+  return (
+    <section
+      className={styles.chartCard}
+      aria-label="Total sales by sales channel"
+    >
+      <h2 className={styles.chartTitle}>Total sales by sales channel</h2>
+      <div className={styles.donutLayout}>
+        <div className={styles.donutFrame}>
+          {ready && pieRows.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip
+                  content={(props) => (
+                    <MoneyTooltip {...props} formatValue={dollars} />
+                  )}
+                />
+                <Pie
+                  data={pieRows}
+                  dataKey="value"
+                  nameKey="name"
+                  innerRadius="72%"
+                  outerRadius="96%"
+                  paddingAngle={1}
+                  startAngle={90}
+                  endAngle={-270}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                >
+                  {pieRows.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className={styles.chartPlaceholder} />
+          )}
+          {topChannel && (
+            <div className={styles.donutCenter}>
+              <div className={styles.donutCenterLabel}>{topChannel.label}</div>
+              <div className={styles.donutCenterValue}>
+                {compactDollars(topChannel.ty)}
+              </div>
+              <ChangeLabel metric={topChannel} />
+            </div>
+          )}
+        </div>
+        <div className={styles.channelList}>
+          {charts.salesByChannel.map((row) => (
+            <div className={styles.channelRow} key={row.channel}>
+              <span className={styles.channelName}>
+                <span
+                  className={styles.channelSwatch}
+                  style={{
+                    background: CHANNEL_COLORS[row.channel] ?? "#9dccdf",
+                  }}
+                />
+                <span className={styles.channelText}>{row.label}</span>
+              </span>
+              <span className={styles.channelAmount}>{dollars(row.ty)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProductBars({ rows }: { rows: ProductChartRow[] }) {
+  const max = Math.max(
+    1,
+    ...rows.flatMap((row) => [Math.max(row.ty, 0), Math.max(row.ly, 0)]),
+  );
+  return (
+    <div className={styles.productBars}>
+      {rows.map((row) => {
+        const tyWidth = `${Math.max(0, (row.ty / max) * 100)}%`;
+        const lyWidth = `${Math.max(0, (row.ly / max) * 100)}%`;
+        return (
+          <div key={`${row.name}|${row.category ?? ""}`}>
+            <div className={styles.productName}>
+              {row.category ? `${row.name} · ${row.category}` : row.name}
+            </div>
+            <div className={styles.productBarRow}>
+              <div>
+                <div className={styles.barTrack}>
+                  <div className={styles.barFill} style={{ width: tyWidth }} />
+                </div>
+                <div
+                  className={`${styles.barTrack} ${styles.comparisonBarTrack}`}
+                >
+                  <div
+                    className={`${styles.barFill} ${styles.comparisonBarFill}`}
+                    style={{ width: lyWidth }}
+                  />
+                </div>
+              </div>
+              <span className={styles.barAmount}>{dollars(row.ty)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TopProductsCard({ rows }: { rows: ProductChartRow[] }) {
+  return (
+    <section className={styles.chartCard} aria-label="Total sales by product">
+      <h2 className={styles.chartTitle}>Total sales by product</h2>
+      <ProductBars rows={rows} />
+    </section>
+  );
+}
+
+function AnalyticsCharts({ charts }: { charts: AnalyticsChartSummary }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+
+  const currentLabel = rangeLabel(charts.range);
+  const comparisonLabel = rangeLabel(charts.comparisonRange);
+
+  return (
+    <div className={styles.chartGrid}>
+      <LineMetricCard
+        title="Total sales over time"
+        metric={charts.totalSales}
+        points={charts.salesOverTime}
+        currentLabel={currentLabel}
+        comparisonLabel={comparisonLabel}
+        ready={ready}
+        wide
+        formatValue={preciseDollars}
+      />
+      <SalesChannelCard charts={charts} ready={ready} />
+      <LineMetricCard
+        title="Average order value over time"
+        metric={charts.averageOrderValue}
+        points={charts.averageOrderValueOverTime}
+        currentLabel={currentLabel}
+        comparisonLabel={comparisonLabel}
+        ready={ready}
+        compact
+        formatValue={preciseDollars}
+      />
+      <TopProductsCard rows={charts.topProducts} />
+    </div>
+  );
 }
 
 function PairCells({ pair }: { pair: CellPair }) {
@@ -593,6 +1019,7 @@ export default function Analytics() {
     historical,
     lastSyncedLabel,
     override,
+    charts,
     weekly,
     productSelling,
     top10,
@@ -865,6 +1292,8 @@ export default function Analytics() {
             )}
         </s-stack>
       </s-section>
+
+      {charts && <AnalyticsCharts charts={charts} />}
 
       {weekly ? (
         // One card, three tabs. The tables have different column counts
