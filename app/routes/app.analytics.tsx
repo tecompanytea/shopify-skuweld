@@ -304,16 +304,14 @@ function moneyAxisLabel(cents: number): string {
   return `${sign}$${Math.round(abs)}`;
 }
 
-function niceStepCents(targetStepCents: number): number {
-  const targetDollars = Math.max(targetStepCents / 100, 1);
-  const magnitude = 10 ** Math.floor(Math.log10(targetDollars));
-  const normalized = targetDollars / magnitude;
-  const multiplier =
-    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return multiplier * magnitude * 100;
-}
+const MONEY_AXIS_STEPS = [
+  25, 50, 100, 250, 500, 1000, 2000, 2500, 5000, 10000, 25000, 50000,
+];
 
-function moneyAxisTicks(points: ChartPoint[]): number[] {
+function moneyAxisScale(points: ChartPoint[]): {
+  ticks: number[];
+  domainMax: number;
+} {
   const maxValue = Math.max(
     0,
     ...points.flatMap((point) => [
@@ -321,8 +319,26 @@ function moneyAxisTicks(points: ChartPoint[]): number[] {
       Math.max(point.ly, 0),
     ]),
   );
-  const step = niceStepCents(maxValue / 3);
-  return [0, step, step * 2, step * 3];
+  const maxDollars = maxValue / 100;
+  const stepDollars =
+    MONEY_AXIS_STEPS.find((step) => step * 3 >= maxDollars * 0.95) ??
+    Math.ceil(maxDollars / 3);
+  const ticks = [0, stepDollars, stepDollars * 2, stepDollars * 3].map(
+    (dollars) => dollars * 100,
+  );
+
+  return {
+    ticks,
+    domainMax: Math.max(maxValue, ticks[ticks.length - 1]),
+  };
+}
+
+function xAxisTicks(points: ChartPoint[]): string[] | undefined {
+  if (points.length < 28) return undefined;
+  const step = points.length <= 35 ? 3 : Math.ceil(points.length / 10);
+  return points
+    .filter((_, index) => index % step === 0)
+    .map((point) => point.label);
 }
 
 function rangeLabel(range: { start: string; end: string }): string {
@@ -450,8 +466,8 @@ function LineMetricCard({
   compact?: boolean;
   formatValue: (cents: number) => string;
 }) {
-  const yTicks = moneyAxisTicks(points);
-  const yMax = yTicks[yTicks.length - 1];
+  const yAxis = moneyAxisScale(points);
+  const xTicks = xAxisTicks(points);
 
   return (
     <section
@@ -483,6 +499,8 @@ function LineMetricCard({
                 tickLine={false}
                 tick={{ fill: "#6d7175", fontSize: 12 }}
                 tickMargin={14}
+                ticks={xTicks}
+                interval={xTicks ? 0 : "preserveEnd"}
                 minTickGap={24}
               />
               <YAxis
@@ -490,8 +508,8 @@ function LineMetricCard({
                 tickLine={false}
                 tick={{ fill: "#6d7175", fontSize: 12 }}
                 tickFormatter={moneyAxisLabel}
-                ticks={yTicks}
-                domain={[0, yMax]}
+                ticks={yAxis.ticks}
+                domain={[0, yAxis.domainMax]}
                 width={54}
               />
               <Tooltip
