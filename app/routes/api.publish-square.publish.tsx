@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 
 import { getShopifyProductForSquare } from "../.server/shopify/product-for-square";
 import {
@@ -14,6 +14,20 @@ import {
 import { authenticate } from "../shopify.server";
 
 const PUBLISH_SCOPES = ["ITEMS_WRITE"] as const;
+
+function extensionCors(response: Response) {
+  response.headers.set("Access-Control-Allow-Origin", "*");
+  response.headers.set(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type",
+  );
+  response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.headers.set(
+    "Access-Control-Expose-Headers",
+    "X-Shopify-API-Request-Failure-Reauthorize-Url",
+  );
+  return response;
+}
 
 interface PublishBody {
   productId?: unknown;
@@ -57,6 +71,24 @@ async function requestBody(request: Request) {
     overrides: normalizePublishOverrides(body?.overrides),
   };
 }
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  if (request.method === "OPTIONS") {
+    return extensionCors(
+      new Response(null, {
+        status: 204,
+        headers: { "Access-Control-Max-Age": "7200" },
+      }),
+    );
+  }
+
+  return extensionCors(
+    Response.json(
+      { code: "METHOD_NOT_ALLOWED", message: "Use POST for this endpoint" },
+      { status: 405, headers: { Allow: "POST, OPTIONS" } },
+    ),
+  );
+};
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin, cors } = await authenticate.admin(request);
