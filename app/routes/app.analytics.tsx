@@ -306,9 +306,17 @@ function moneyAxisLabel(cents: number): string {
   return `${sign}$${Math.round(abs)}`;
 }
 
-const MONEY_AXIS_STEPS = [
-  25, 50, 100, 250, 500, 1000, 2000, 2500, 5000, 10000, 25000, 50000,
-];
+const MONEY_AXIS_STEP_MULTIPLIERS = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10];
+
+function moneyAxisStepDollars(maxDollars: number): number {
+  const target = Math.max(maxDollars / 3, 1);
+  const magnitude = 10 ** Math.floor(Math.log10(target));
+  const multiplier =
+    MONEY_AXIS_STEP_MULTIPLIERS.find(
+      (candidate) => candidate * magnitude * 3 > maxDollars,
+    ) ?? 10;
+  return multiplier * magnitude;
+}
 
 function moneyAxisScale(points: ChartPoint[]): {
   ticks: number[];
@@ -322,16 +330,14 @@ function moneyAxisScale(points: ChartPoint[]): {
     ]),
   );
   const maxDollars = maxValue / 100;
-  const stepDollars =
-    MONEY_AXIS_STEPS.find((step) => step * 3 >= maxDollars * 0.95) ??
-    Math.ceil(maxDollars / 3);
+  const stepDollars = moneyAxisStepDollars(maxDollars);
   const ticks = [0, stepDollars, stepDollars * 2, stepDollars * 3].map(
     (dollars) => dollars * 100,
   );
 
   return {
     ticks,
-    domainMax: Math.max(maxValue, ticks[ticks.length - 1]),
+    domainMax: ticks[ticks.length - 1],
   };
 }
 
