@@ -10,8 +10,13 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
-import { getSquareConnection } from "../.server/square/client";
+import {
+  getSquareConnection,
+  hasSquareScopes,
+} from "../.server/square/client";
 import { squareConnectionAction } from "../.server/square/connection-action";
+
+const PUBLISH_SCOPES = ["ITEMS_WRITE"] as const;
 
 // Dashboard reads only the local DB so it stays fast; the Products and
 // SKU Mapping pages do the live channel fetches.
@@ -25,6 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           connected: true as const,
           merchantName: connection.merchantName ?? connection.merchantId,
           merchantId: connection.merchantId,
+          needsReconnect: !hasSquareScopes(connection.scopes, PUBLISH_SCOPES),
           // Formatted server-side so SSR and hydration agree on the locale.
           connectedSince: connection.createdAt.toLocaleDateString("en-US", {
             year: "numeric",
@@ -105,7 +111,11 @@ export default function Index() {
                 <s-stack direction="inline" gap="small-200" alignItems="center">
                   <s-heading>Square</s-heading>
                   {square.connected ? (
-                    <s-badge tone="success">Connected</s-badge>
+                    square.needsReconnect ? (
+                      <s-badge tone="warning">Reconnect needed</s-badge>
+                    ) : (
+                      <s-badge tone="success">Connected</s-badge>
+                    )
                   ) : (
                     <s-badge tone="warning">Not connected</s-badge>
                   )}
@@ -119,15 +129,32 @@ export default function Index() {
             </s-grid-item>
             <s-grid-item>
               {square.connected ? (
-                <s-button
-                  variant="secondary"
-                  tone="critical"
-                  disabled={busy}
-                  commandFor={DISCONNECT_MODAL_ID}
-                  command="--show"
-                >
-                  Disconnect
-                </s-button>
+                <s-stack direction="inline" gap="small">
+                  {square.needsReconnect && (
+                    <s-button
+                      variant="primary"
+                      disabled={busy}
+                      loading={busy}
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "connect" },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Reconnect
+                    </s-button>
+                  )}
+                  <s-button
+                    variant="secondary"
+                    tone="critical"
+                    disabled={busy}
+                    commandFor={DISCONNECT_MODAL_ID}
+                    command="--show"
+                  >
+                    Disconnect
+                  </s-button>
+                </s-stack>
               ) : (
                 <s-button
                   variant="primary"
@@ -146,8 +173,14 @@ export default function Index() {
           <s-text color="subdued">
             {square.connected
               ? `Merchant ID ${square.merchantId} · Connected since ${square.connectedSince}`
-              : "Connect to compare your Square catalog with Shopify. You will approve read-only access on Square."}
+              : "Connect to compare your Square catalog with Shopify and publish approved products into Square."}
           </s-text>
+          {square.connected && square.needsReconnect && (
+            <s-banner tone="warning">
+              Publish on Square needs catalog write access. Reconnect Square
+              once to approve the new scope.
+            </s-banner>
+          )}
         </s-stack>
 
         {square.connected && (

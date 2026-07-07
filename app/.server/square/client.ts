@@ -35,18 +35,31 @@ export function getSquareConnection(shop: string) {
   return prisma.squareConnection.findUnique({ where: { shop } });
 }
 
+export function hasSquareScopes(
+  grantedScopes: string | null | undefined,
+  requiredScopes: readonly string[],
+): boolean {
+  const granted = new Set((grantedScopes ?? "").split(/\s+/).filter(Boolean));
+  return requiredScopes.every((scope) => granted.has(scope));
+}
+
 export async function persistTokens(
   shop: string,
   tokens: SquareTokenResponse,
-  extra: { merchantName?: string | null; mainLocationId?: string | null } = {},
+  extra: {
+    merchantName?: string | null;
+    mainLocationId?: string | null;
+    scopes?: string | null;
+  } = {},
 ): Promise<SquareConnection> {
   const data = {
     merchantId: tokens.merchant_id,
     accessToken: encryptToken(tokens.access_token),
     refreshToken: encryptToken(tokens.refresh_token),
     expiresAt: new Date(tokens.expires_at),
-    scopes: SQUARE_SCOPES.join(" "),
-    ...extra,
+    scopes: extra.scopes ?? tokens.scope ?? SQUARE_SCOPES.join(" "),
+    merchantName: extra.merchantName,
+    mainLocationId: extra.mainLocationId,
   };
   return prisma.squareConnection.upsert({
     where: { shop },
@@ -59,7 +72,9 @@ async function refreshConnection(
   connection: SquareConnection,
 ): Promise<SquareConnection> {
   const tokens = await refreshAccessToken(decryptToken(connection.refreshToken));
-  return persistTokens(connection.shop, tokens);
+  return persistTokens(connection.shop, tokens, {
+    scopes: tokens.scope ?? connection.scopes,
+  });
 }
 
 export async function getSquareAccessToken(shop: string): Promise<string> {
@@ -72,10 +87,9 @@ export async function getSquareAccessToken(shop: string): Promise<string> {
   return decryptToken(connection.accessToken);
 }
 
-function defaultHeaders(accessToken: string): Record<string, string> {
+function authHeaders(accessToken: string): Record<string, string> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
-    "Content-Type": "application/json",
   };
   // Optional pin; when unset, Square uses the app's dashboard API version.
   if (process.env.SQUARE_API_VERSION) {
@@ -84,17 +98,18 @@ function defaultHeaders(accessToken: string): Record<string, string> {
   return headers;
 }
 
-export async function squareFetch<T>(
+async function squareResponse(
   shop: string,
   path: string,
   init: RequestInit = {},
-): Promise<T> {
+  buildHeaders: (accessToken: string) => Record<string, string>,
+): Promise<Response> {
   const accessToken = await getSquareAccessToken(shop);
 
   const doFetch = (token: string) =>
     fetch(`${SQUARE_BASE_URL}${path}`, {
       ...init,
-      headers: { ...defaultHeaders(token), ...init.headers },
+      headers: { ...buildHeaders(token), ...init.headers },
     });
 
   let response = await doFetch(accessToken);
@@ -128,6 +143,34 @@ export async function squareFetch<T>(
     }
     throw new SquareApiError(response.status, errors);
   }
+
+  return response;
+}
+
+export async function squareFetch<T>(
+  shop: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await squareResponse(shop, path, init, (token) => ({
+    ...authHeaders(token),
+    "Content-Type": "application/json",
+  }));
+
+  return (await response.json()) as T;
+}
+
+export async function squareFetchForm<T>(
+  shop: string,
+  path: string,
+  body: FormData,
+): Promise<T> {
+  const response = await squareResponse(
+    shop,
+    path,
+    { method: "POST", body },
+    authHeaders,
+  );
 
   return (await response.json()) as T;
 }
