@@ -648,16 +648,6 @@ function AnalyticsCharts({ charts }: { charts: AnalyticsChartSummary }) {
         formatValue={preciseDollars}
       />
       <SalesChannelCard charts={charts} ready={ready} />
-      <LineMetricCard
-        title="Average order value over time"
-        metric={charts.averageOrderValue}
-        points={charts.averageOrderValueOverTime}
-        currentLabel={currentLabel}
-        comparisonLabel={comparisonLabel}
-        ready={ready}
-        compact
-        formatValue={preciseDollars}
-      />
       <TopProductsCard rows={charts.topProducts} />
     </div>
   );
