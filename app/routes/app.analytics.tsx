@@ -366,6 +366,66 @@ function rangeLabel(range: { start: string; end: string }): string {
   return `${formatDay(range.start)} - ${formatDay(range.end)}`;
 }
 
+const CHART_DEFINITIONS: Record<
+  string,
+  { description: string; formula?: string }
+> = {
+  "Total sales over time": {
+    description:
+      "Amount spent (subtotal, taxes, shipping, returns, discounts, fees, etc.).",
+    formula:
+      "Total sales = net sales + additional fees + duties + shipping charges + taxes",
+  },
+  "Total sales by sales channel": {
+    description: "Total sales grouped by sales channel.",
+  },
+  "Total sales by product": {
+    description: "Total sales grouped by product.",
+  },
+};
+
+function chartTitleId(title: string): string {
+  return `analytics-${title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")}-definition`;
+}
+
+function ChartTitle({ title }: { title: string }) {
+  const definition = CHART_DEFINITIONS[title];
+  if (!definition) {
+    return (
+      <div className={styles.chartHeader}>
+        <h2 className={styles.chartTitle}>{title}</h2>
+      </div>
+    );
+  }
+
+  const tooltipId = chartTitleId(title);
+  return (
+    <div className={styles.chartHeader}>
+      <s-clickable
+        interestFor={tooltipId}
+        accessibilityLabel={`Open definition for ${title}`}
+      >
+        <span
+          role="heading"
+          aria-level={2}
+          className={`${styles.chartTitle} ${styles.chartTitleTrigger}`}
+        >
+          {title}
+        </span>
+      </s-clickable>
+      <s-tooltip id={tooltipId}>
+        <s-paragraph>{definition.description}</s-paragraph>
+        {definition.formula ? (
+          <s-paragraph>{definition.formula}</s-paragraph>
+        ) : null}
+      </s-tooltip>
+    </div>
+  );
+}
+
 function ChangeLabel({
   metric,
 }: {
@@ -476,6 +536,31 @@ function MoneyTooltip({
   );
 }
 
+function PieTooltip({ active, payload }: TooltipContentProps) {
+  if (!active || !payload?.length) return null;
+  const row = payload.find((entry) => typeof entry.value === "number");
+  if (!row || typeof row.value !== "number") return null;
+  return (
+    <div className={`${styles.tooltip} ${styles.pieTooltip}`}>
+      <div className={styles.pieTooltipRow}>
+        <span className={styles.tooltipName}>
+          <span
+            className={styles.tooltipSwatch}
+            style={{
+              background:
+                typeof row.color === "string" ? row.color : CHART_CURRENT_COLOR,
+            }}
+          />
+          <span className={styles.pieTooltipName}>
+            {String(row.name ?? "")}
+          </span>
+        </span>
+        <span className={styles.tooltipAmount}>{dollars(row.value)}</span>
+      </div>
+    </div>
+  );
+}
+
 function LineMetricCard({
   title,
   metric,
@@ -505,9 +590,7 @@ function LineMetricCard({
       className={`${styles.chartCard}${wide ? ` ${styles.wideChartCard}` : ""}`}
       aria-label={title}
     >
-      <div className={styles.chartHeader}>
-        <h2 className={styles.chartTitle}>{title}</h2>
-      </div>
+      <ChartTitle title={title} />
       <div className={styles.metricRow}>
         <span
           className={`${styles.metricValue}${compact ? ` ${styles.smallMetricValue}` : ""}`}
@@ -616,16 +699,17 @@ function SalesChannelCard({
       className={styles.chartCard}
       aria-label="Total sales by sales channel"
     >
-      <h2 className={styles.chartTitle}>Total sales by sales channel</h2>
+      <ChartTitle title="Total sales by sales channel" />
       <div className={styles.donutLayout}>
         <div className={styles.donutFrame}>
           {ready && pieRows.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Tooltip
-                  content={(props) => (
-                    <MoneyTooltip {...props} formatValue={dollars} />
-                  )}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  position={{ x: 118, y: 48 }}
+                  wrapperStyle={{ pointerEvents: "none", zIndex: 4 }}
+                  content={(props) => <PieTooltip {...props} />}
                 />
                 <Pie
                   data={pieRows}
@@ -721,7 +805,7 @@ function ProductBars({ rows }: { rows: ProductChartRow[] }) {
 function TopProductsCard({ rows }: { rows: ProductChartRow[] }) {
   return (
     <section className={styles.chartCard} aria-label="Total sales by product">
-      <h2 className={styles.chartTitle}>Total sales by product</h2>
+      <ChartTitle title="Total sales by product" />
       <ProductBars rows={rows} />
     </section>
   );

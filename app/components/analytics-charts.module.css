@@ -39,6 +39,11 @@
   text-underline-offset: 5px;
 }
 
+.chartTitleTrigger {
+  display: inline-flex;
+  cursor: help;
+}
+
 .metricRow {
   display: flex;
   align-items: baseline;
@@ -155,6 +160,27 @@
 
 .tooltipAmount {
   font-weight: 650;
+  white-space: nowrap;
+}
+
+.pieTooltip {
+  min-inline-size: 152px;
+  max-inline-size: 180px;
+  padding: 8px 10px;
+}
+
+.pieTooltipRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: #202223;
+  font-size: 12px;
+}
+
+.pieTooltipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
