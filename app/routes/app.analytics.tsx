@@ -775,14 +775,6 @@ export default function Analytics() {
               setSearchParams(params);
             }}
           />
-          <s-button
-            icon="refresh"
-            disabled={Boolean(override) || busy || !stale}
-            loading={busy}
-            onClick={refresh}
-          >
-            Refresh
-          </s-button>
           {type !== "units-by-size" && (
             <ComparisonPicker
               compare={compare}
@@ -792,6 +784,14 @@ export default function Analytics() {
               }
             />
           )}
+          <s-button
+            icon="refresh"
+            disabled={Boolean(override) || busy || !stale}
+            loading={busy}
+            onClick={refresh}
+          >
+            Refresh
+          </s-button>
         </s-stack>
       </s-box>
 
