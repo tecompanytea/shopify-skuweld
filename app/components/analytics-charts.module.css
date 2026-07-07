@@ -39,8 +39,8 @@
   text-underline-offset: 5px;
 }
 
-.chartTitleTrigger {
-  display: inline-flex;
+.chartTitle s-text {
+  display: inline;
   cursor: help;
 }
 

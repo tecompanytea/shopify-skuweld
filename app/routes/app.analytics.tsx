@@ -417,18 +417,9 @@ function ChartTitle({ title }: { title: string }) {
   const tooltipId = chartTitleId(title);
   return (
     <div className={styles.chartHeader}>
-      <s-clickable
-        interestFor={tooltipId}
-        accessibilityLabel={`Open definition for ${title}`}
-      >
-        <span
-          role="heading"
-          aria-level={2}
-          className={`${styles.chartTitle} ${styles.chartTitleTrigger}`}
-        >
-          {title}
-        </span>
-      </s-clickable>
+      <h2 className={styles.chartTitle}>
+        <s-text interestFor={tooltipId}>{title}</s-text>
+      </h2>
       <s-tooltip id={tooltipId}>
         <s-paragraph>{definition.description}</s-paragraph>
         {definition.formula ? (
