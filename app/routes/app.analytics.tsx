@@ -1061,17 +1061,15 @@ function Top10Block({ report }: { report: Top10Report }) {
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">#</s-table-header>
-              <s-table-header listSlot="primary">Top 10 items</s-table-header>
-              <s-table-header listSlot="secondary">Variation</s-table-header>
+              <s-table-header listSlot="primary">Top 10 products</s-table-header>
               <s-table-header listSlot="labeled">Net $</s-table-header>
               <s-table-header listSlot="labeled">Units</s-table-header>
             </s-table-header-row>
             <s-table-body>
               {channel.topOverall.map((item, index) => (
-                <s-table-row key={`${item.name}|${item.variation}`}>
+                <s-table-row key={item.name}>
                   <s-table-cell>{index + 1}</s-table-cell>
                   <s-table-cell>{item.name}</s-table-cell>
-                  <s-table-cell>{item.variation ?? "—"}</s-table-cell>
                   <s-table-cell>{dollars(item.net)}</s-table-cell>
                   <s-table-cell>{item.units}</s-table-cell>
                 </s-table-row>
@@ -1157,7 +1155,7 @@ function ProductSellingBlock({ report }: { report: ProductSellingReport }) {
         </s-table-header-row>
         <s-table-body>
           {report.rows.map((row, index) => (
-            <s-table-row key={row.familyKey}>
+            <s-table-row key={row.productKey}>
               <s-table-cell>{index + 1}</s-table-cell>
               <s-table-cell>{row.name}</s-table-cell>
               <PairCells pair={{ ty: row.ty.net, ly: row.ly.net }} />

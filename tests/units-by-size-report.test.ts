@@ -8,70 +8,93 @@ vi.mock("../app/db.server", () => ({
 import { computeUnitsBySizeReport } from "../app/.server/analytics/units-by-size-report";
 
 type Line = {
+  source: string;
   channel: string;
   itemName: string;
   variationName: string | null;
+  productKey: string | null;
+  productTitle: string | null;
   sku: string | null;
   quantity: number;
+  netCents: number;
 };
 
 const RANGE = { start: "2026-06-22", end: "2026-06-28" };
 
+const line = (over: Partial<Line>): Line => ({
+  source: "square",
+  channel: "WV",
+  itemName: "Jade Oolong",
+  variationName: null,
+  productKey: null,
+  productTitle: null,
+  sku: null,
+  quantity: 1,
+  netCents: 0,
+  ...over,
+});
+
 const LINES: Line[] = [
-  {
-    channel: "WV",
+  line({
     itemName: "Jade Oolong - 2 oz",
     variationName: "2 oz",
+    productKey: "sq:item-jade",
+    productTitle: "Jade Oolong",
     sku: "100202",
     quantity: 3,
-  },
-  // Mislabeled SKU (family 9999): the unit-majority vote regroups it under
-  // Jade Oolong's real family 1002; its size still reads off its own SKU
-  // code ("01" -> 1 oz) since the variant name matches no size.
-  {
-    channel: "WV",
-    itemName: "Jade Oolong",
+  }),
+  // Mislabeled SKU (family 9999) on a variation of the same catalog item: it
+  // groups with its product, and the Style # comes from the family that sold
+  // the most units. Its size still reads off its own SKU code ("01" -> 1 oz)
+  // since the variant name matches no size.
+  line({
     variationName: "Sample Pack",
+    productKey: "sq:item-jade",
+    productTitle: "Jade Oolong",
     sku: "999901",
     quantity: 2,
-  },
-  // SKU-less line adopts the family voted for its product name.
-  {
+  }),
+  // No catalog key (retired variant): adopted by the product it names.
+  line({
     channel: "ECOM",
+    source: "shopify",
     itemName: "Jade Oolong - 8 oz",
     variationName: "8 oz",
-    sku: null,
     quantity: 1,
-  },
+  }),
   // Return: signed negative units net against the same size bucket.
-  {
-    channel: "WV",
+  line({
     itemName: "Jade Oolong - 2 oz",
     variationName: "2 oz",
+    productKey: "sq:item-jade",
+    productTitle: "Jade Oolong",
     sku: "100202",
     quantity: -1,
-  },
+  }),
   // In-scheme SKU with a non-size code lands in "Other".
-  {
+  line({
     channel: "EV",
     itemName: "Gift Box",
-    variationName: null,
+    productKey: "sq:item-gift",
+    productTitle: "Gift Box",
     sku: "300099",
     quantity: 6,
-  },
-  // No SKU anywhere for this name: keyed by name, no style number.
-  {
+  }),
+  // No SKU and no catalog key: keyed by name, no style number.
+  line({
     channel: "EV",
     itemName: "Matcha - 10g",
     variationName: "10g",
-    sku: null,
     quantity: 4,
-  },
+  }),
 ];
 
 beforeEach(() => {
   findMany.mockReset();
-  findMany.mockResolvedValue(LINES);
+  // The Shopify bridge query is the one without a day window.
+  findMany.mockImplementation((args) =>
+    Promise.resolve(args.distinct ? [] : LINES),
+  );
 });
 
 describe("computeUnitsBySizeReport", () => {
@@ -80,13 +103,13 @@ describe("computeUnitsBySizeReport", () => {
     expect(report.channels).toEqual(["ECOM", "EV", "WV"]);
   });
 
-  it("groups by voted SKU family, nets returns, and buckets sizes", async () => {
+  it("groups by catalog product, nets returns, and buckets sizes", async () => {
     const report = await computeUnitsBySizeReport("s", RANGE);
     const jade = report.rows.find((r) => r.name === "Jade Oolong")!;
     expect(jade.styleNumber).toBe("002"); // family 1002 minus category digit
     expect(jade.total["2 oz"]).toBe(2); // 3 sold − 1 returned
-    expect(jade.total["1 oz"]).toBe(2); // mislabeled-SKU line, regrouped
-    expect(jade.total["8 oz"]).toBe(1); // SKU-less line, adopted by name
+    expect(jade.total["1 oz"]).toBe(2); // mislabeled-SKU line, same product
+    expect(jade.total["8 oz"]).toBe(1); // keyless line, adopted by name
     expect(jade.totalUnits).toBe(5);
     expect(jade.byChannel.WV["2 oz"]).toBe(2);
     expect(jade.byChannel.ECOM["8 oz"]).toBe(1);

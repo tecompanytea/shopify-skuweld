@@ -44,6 +44,7 @@ interface SquareOrder {
 
 interface CatalogVariationInfo {
   sku: string | null;
+  itemId: string | null;
   itemName: string | null;
   categoryName: string | null;
 }
@@ -60,6 +61,8 @@ type Row = {
   sku: string | null;
   itemName: string;
   variationName: string | null;
+  productKey: string | null;
+  productTitle: string | null;
   category: string | null;
   quantity: number;
   grossCents: number;
@@ -145,6 +148,7 @@ async function buildCatalogMap(
   const categoryNames = new Map<string, string>();
   const variations = new Map<string, CatalogVariationInfo>();
   const itemsPending: Array<{
+    itemId: string;
     variationIds: Array<{ id: string; sku: string | null }>;
     itemName: string | null;
     categoryId: string | null;
@@ -184,6 +188,7 @@ async function buildCatalogMap(
         categoryNames.set(object.id, object.category_data.name);
       } else if (object.type === "ITEM" && object.item_data) {
         itemsPending.push({
+          itemId: object.id,
           itemName: object.item_data.name ?? null,
           categoryId:
             object.item_data.reporting_category?.id ??
@@ -206,6 +211,7 @@ async function buildCatalogMap(
     for (const variation of item.variationIds) {
       variations.set(variation.id, {
         sku: variation.sku,
+        itemId: item.itemId,
         itemName: item.itemName,
         categoryName,
       });
@@ -308,8 +314,12 @@ async function collectSquareRows(
           occurredAt,
           day,
           sku: info?.sku ?? null,
+          // As-sold snapshot; `productKey`/`productTitle` carry the stable
+          // catalog identity (a renamed button keeps its old name here).
           itemName: line.name ?? info?.itemName ?? "(unknown item)",
           variationName: line.variation_name ?? null,
+          productKey: info?.itemId ? `sq:${info.itemId}` : null,
+          productTitle: info?.itemName ?? null,
           category: isGiftCard
             ? "Gift Card"
             : (info?.categoryName ?? "Uncategorized"),

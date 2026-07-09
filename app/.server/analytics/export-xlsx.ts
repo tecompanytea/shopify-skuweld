@@ -523,22 +523,21 @@ function writeTop10Sheets(
 
   for (const channel of report.channels) {
     const sheet = workbook.addWorksheet(`${prefix}Top10 ${channel.channel}`.slice(0, 31));
-    sheet.getColumn(2).width = 38;
-    sheet.getColumn(3).width = 16;
-    sheet.getColumn(4).width = 12;
-    sheet.getColumn(5).width = 8;
+    sheet.getColumn(2).width = 44;
+    sheet.getColumn(3).width = 12;
+    sheet.getColumn(4).width = 8;
     const writeList = (
       label: string,
       items: Top10Report["channels"][number]["topOverall"],
     ) => {
       sheet.addRow([]);
       sheet.addRow([label]).font = { bold: true };
-      const head = sheet.addRow(["#", "Item", "Variation", "Net $", "Units"]);
+      const head = sheet.addRow(["#", "Product", "Net $", "Units"]);
       head.font = { bold: true };
       items.forEach((item, index) => {
-        const row = sheet.addRow([index + 1, item.name, item.variation ?? ""]);
-        moneyCell(row, 4, item.net);
-        row.getCell(5).value = item.units;
+        const row = sheet.addRow([index + 1, item.name]);
+        moneyCell(row, 3, item.net);
+        row.getCell(4).value = item.units;
       });
     };
     writeList("All Categories", channel.topOverall);

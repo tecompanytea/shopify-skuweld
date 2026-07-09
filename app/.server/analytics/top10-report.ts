@@ -5,16 +5,24 @@ import {
   type ComparisonMode,
   type DayRange,
 } from "../../lib/periods";
+import { loadShopifyBridge, resolveProductIdentity } from "./product-identity";
 
 // Category Top10 weekly report: per channel (stores, web, total), net sales
 // by category TY vs weekday-aligned LY with penetration %, plus the top
-// items per category ranked by TY net. Mirrors the manual workbook:
-// invoiced excluded, gift cards tracked outside categories, item rank at
-// item+variation granularity.
+// products per category ranked by TY net. Mirrors the manual workbook:
+// invoiced excluded, gift cards tracked outside categories.
+//
+// Ranking is by product, not by the order line's item+variation. Those names
+// are order-time snapshots, so a renamed POS button ("Mushroom Biscuit" ->
+// "Daikon Biscuit") used to rank as two products, every tea size ranked
+// separately, and the ALL-channels list ranked each product once per channel
+// — "Pineapple Linzer Cookie" was the top seller and appeared nowhere,
+// scattered across "Pineapple Linzer Box|1 Box", "|2 Boxes" and
+// "Pineapple Linzer|Regular". Product identity fixes all three, and makes
+// this report agree with Product Selling.
 
 export interface Top10Item {
   name: string;
-  variation: string | null;
   net: number; // cents
   units: number;
 }
@@ -88,16 +96,25 @@ export async function computeTop10Report(
         category: true,
         itemName: true,
         variationName: true,
+        productKey: true,
+        productTitle: true,
+        sku: true,
         netCents: true,
         quantity: true,
         kind: true,
       },
     });
-  const [tyLines, lyLines] = await Promise.all([fetch(range), fetch(lyRange)]);
+  const [tyLines, lyLines, bridge] = await Promise.all([
+    fetch(range),
+    fetch(lyRange),
+    loadShopifyBridge(shop),
+  ]);
+  // TY lines only: the item lists rank this year, and one identity across the
+  // whole set keeps a product's key stable between channels.
+  const identity = resolveProductIdentity(tyLines, bridge);
 
   interface ItemAcc {
-    name: string;
-    variation: string | null;
+    key: string;
     net: number;
     units: number;
   }
@@ -128,17 +145,11 @@ export async function computeTop10Report(
 
   const addItem = (
     map: Map<string, ItemAcc>,
-    line: { itemName: string; variationName: string | null },
+    key: string,
     net: number,
     units: number,
   ) => {
-    const key = `${line.itemName}|${line.variationName ?? ""}`;
-    const item = map.get(key) ?? {
-      name: line.itemName,
-      variation: line.variationName,
-      net: 0,
-      units: 0,
-    };
+    const item = map.get(key) ?? { key, net: 0, units: 0 };
     item.net += net;
     item.units += units;
     map.set(key, item);
@@ -165,13 +176,14 @@ export async function computeTop10Report(
             category,
             (acc.categoryTy.get(category) ?? 0) + line.netCents,
           );
-          addItem(acc.items, line, line.netCents, units);
+          const key = identity.keyOf(line);
+          addItem(acc.items, key, line.netCents, units);
           let byCategory = acc.itemsByCategory.get(category);
           if (!byCategory) {
             byCategory = new Map();
             acc.itemsByCategory.set(category, byCategory);
           }
-          addItem(byCategory, line, line.netCents, units);
+          addItem(byCategory, key, line.netCents, units);
         } else {
           acc.totalLy += line.netCents;
           acc.categoryLy.set(
@@ -184,7 +196,14 @@ export async function computeTop10Report(
   }
 
   const top = (map: Map<string, ItemAcc>): Top10Item[] =>
-    [...map.values()].sort((a, b) => b.net - a.net).slice(0, TOP_N);
+    [...map.values()]
+      .sort((a, b) => b.net - a.net)
+      .slice(0, TOP_N)
+      .map((item) => ({
+        name: identity.titleOf(item.key),
+        net: item.net,
+        units: item.units,
+      }));
 
   const order = ["WV", "EV", "ECOM", "ALL"];
   return {

@@ -1,16 +1,17 @@
 import prisma from "../../db.server";
 import { SIZE_COLUMNS, type SizeColumn } from "../../lib/analytics-scopes";
 import type { DayRange } from "../../lib/periods";
-import { productName, skuFamily } from "../../lib/sku-scheme";
+import { skuFamily } from "../../lib/sku-scheme";
+import { loadShopifyBridge, resolveProductIdentity } from "./product-identity";
 
 export { SIZE_COLUMNS, type SizeColumn };
 
 // Units-by-size report: loose leaf tea, NET units (after returns), one row
-// per product family, one column per size. Mirrors the manual
-// "UnitSales - by size" workbook: sizes are the SKU variant codes
-// (01/02/04/08 = 1/2/4/8 oz, plus 10g), everything else is "Other"
-// (packaged/by-the-box, default variants). Cross-channel identity by SKU
-// family; the 3-digit family doubles as the "Style #" column.
+// per product, one column per size. Mirrors the manual "UnitSales - by size"
+// workbook: sizes are the SKU variant codes (01/02/04/08 = 1/2/4/8 oz, plus
+// 10g), everything else is "Other" (packaged/by-the-box, default variants).
+// Products come from the shared catalog identity (see ./product-identity);
+// the 3-digit SKU family still supplies the "Style #" column.
 
 export interface UnitsRow {
   name: string;
@@ -58,74 +59,60 @@ export async function computeUnitsBySizeReport(
 ): Promise<UnitsBySizeReport> {
   // Net units after returns on both channels — include return rows; their
   // quantities are signed negative.
-  const lines = await prisma.salesLine.findMany({
-    where: {
-      shop,
-      day: { gte: range.start, lte: range.end },
-      OR: [
-        {
-          source: "square",
-          channel: { in: ["WV", "EV"] },
-          category: "Retail Loose Leaf Tea",
-        },
-        { source: "shopify", category: "Loose Leaf" },
-      ],
-    },
-    select: {
-      channel: true,
-      itemName: true,
-      variationName: true,
-      sku: true,
-      quantity: true,
-    },
-  });
+  const [lines, bridge] = await Promise.all([
+    prisma.salesLine.findMany({
+      where: {
+        shop,
+        day: { gte: range.start, lte: range.end },
+        OR: [
+          {
+            source: "square",
+            channel: { in: ["WV", "EV"] },
+            category: "Retail Loose Leaf Tea",
+          },
+          { source: "shopify", category: "Loose Leaf" },
+        ],
+      },
+      select: {
+        source: true,
+        channel: true,
+        itemName: true,
+        variationName: true,
+        productKey: true,
+        productTitle: true,
+        sku: true,
+        quantity: true,
+        netCents: true,
+      },
+    }),
+    loadShopifyBridge(shop),
+  ]);
+  const identity = resolveProductIdentity(lines, bridge);
 
   interface Acc {
-    name: string;
-    styleNumber: string | null;
+    key: string;
+    // A product's lines all carry the same family in practice; the most-sold
+    // one wins so a stray mis-SKU'd variant can't rename the Style # column.
+    familyUnits: Map<string, number>;
     byChannel: Map<string, Record<SizeColumn, number>>;
   }
   const products = new Map<string, Acc>();
   const channels = new Set<string>();
 
-  // Pass 1: learn each product name's SKU family by unit-majority vote.
-  // This both adopts SKU-less lines into their product (same name, no SKU)
-  // and corrects mislabeled SKUs (a variant carrying another product's SKU
-  // groups with its name, not the wrong family).
-  const votes = new Map<string, Map<string, number>>();
-  for (const line of lines) {
-    const family = skuFamily(line.sku);
-    if (!family) continue;
-    const name = productName(line.itemName, line.variationName).toLowerCase();
-    let tally = votes.get(name);
-    if (!tally) {
-      tally = new Map();
-      votes.set(name, tally);
-    }
-    tally.set(family, (tally.get(family) ?? 0) + Math.abs(line.quantity));
-  }
-  const nameToFamily = new Map<string, string>();
-  for (const [name, tally] of votes) {
-    const winner = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
-    nameToFamily.set(name, winner[0]);
-  }
-
   for (const line of lines) {
     channels.add(line.channel);
-    const name = productName(line.itemName, line.variationName);
-    const family = nameToFamily.get(name.toLowerCase()) ?? skuFamily(line.sku);
-    const key = family ?? `name:${name.toLowerCase()}`;
+    const key = identity.keyOf(line);
     let acc = products.get(key);
     if (!acc) {
-      acc = {
-        name,
-        styleNumber: family ? family.slice(1) : null,
-        byChannel: new Map(),
-      };
+      acc = { key, familyUnits: new Map(), byChannel: new Map() };
       products.set(key, acc);
-    } else if (name.length > acc.name.length) {
-      // Prefer the longest variant of the name — abbreviations lose.
-      acc.name = name;
+    }
+    const family = skuFamily(line.sku);
+    if (family) {
+      acc.familyUnits.set(
+        family,
+        (acc.familyUnits.get(family) ?? 0) + Math.abs(line.quantity),
+      );
     }
     const sizes = acc.byChannel.get(line.channel) ?? emptySizes();
     sizes[sizeOf(line.variationName, line.sku)] += line.quantity;
@@ -141,9 +128,12 @@ export async function computeUnitsBySizeReport(
       byChannel[channel] = sizes;
       for (const size of SIZE_COLUMNS) total[size] += sizes[size];
     }
+    const family = [...acc.familyUnits.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    )[0]?.[0];
     return {
-      name: acc.name,
-      styleNumber: acc.styleNumber,
+      name: identity.titleOf(acc.key),
+      styleNumber: family ? family.slice(1) : null,
       byChannel,
       total,
       totalUnits: SIZE_COLUMNS.reduce((sum, size) => sum + total[size], 0),

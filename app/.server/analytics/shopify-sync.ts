@@ -37,7 +37,7 @@ interface SaleNode {
     name: string;
     sku: string | null;
     variantTitle: string | null;
-    product: { productType: string } | null;
+    product: { id: string; title: string; productType: string } | null;
   };
 }
 
@@ -90,7 +90,7 @@ const ORDERS_QUERY = `#graphql
                     name
                     sku
                     variantTitle
-                    product { productType }
+                    product { id title productType }
                   }
                 }
               }
@@ -208,8 +208,14 @@ async function collectAgreementRows(
             occurredAt,
             day,
             sku: sale.lineItem.sku,
+            // As-sold snapshot ("Product - Variant"); the stable product
+            // identity rides on productKey/productTitle.
             itemName: sale.lineItem.name,
             variationName: sale.lineItem.variantTitle,
+            productKey: sale.lineItem.product
+              ? `sh:${sale.lineItem.product.id}`
+              : null,
+            productTitle: sale.lineItem.product?.title ?? null,
             category: sale.lineItem.product?.productType || null,
             quantity: sale.quantity ?? 0,
             grossCents: net + discount,

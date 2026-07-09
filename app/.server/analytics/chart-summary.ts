@@ -6,7 +6,11 @@ import {
   type ComparisonMode,
   type DayRange,
 } from "../../lib/periods";
-import { productName } from "../../lib/sku-scheme";
+import {
+  loadShopifyBridge,
+  resolveProductIdentity,
+  type ProductIdentity,
+} from "./product-identity";
 
 export interface MetricValue {
   ty: number;
@@ -51,6 +55,9 @@ interface SalesLineForCharts {
   orderId: string;
   itemName: string;
   variationName: string | null;
+  productKey: string | null;
+  productTitle: string | null;
+  sku: string | null;
   category: string | null;
   netCents: number;
 }
@@ -115,6 +122,7 @@ function average(values: Iterable<number>, count: number): number {
 function aggregateWindow(
   rows: SalesLineForCharts[],
   range: DayRange,
+  identity: ProductIdentity,
 ): WindowAccumulator {
   const days = daysInRange(range);
   const netByDay = new Map(days.map((day) => [day, 0]));
@@ -132,16 +140,15 @@ function aggregateWindow(
       (netByChannel.get(row.channel) ?? 0) + row.netCents,
     );
 
-    const name = productName(row.itemName, row.variationName);
-    const productKey = name.trim().toLowerCase();
-    const product = netByProduct.get(productKey) ?? {
-      name,
+    const key = identity.keyOf(row);
+    const product = netByProduct.get(key) ?? {
+      name: identity.titleOf(key),
       category: row.category,
       net: 0,
     };
     product.net += row.netCents;
     if (!product.category && row.category) product.category = row.category;
-    netByProduct.set(productKey, product);
+    netByProduct.set(key, product);
 
     // AOV is order-level, so multiple lines on the same order count once.
     // Return rows are not new orders; they affect net-sales charts, not order
@@ -218,13 +225,19 @@ export async function computeAnalyticsChartSummary(
       orderId: true,
       itemName: true,
       variationName: true,
+      productKey: true,
+      productTitle: true,
+      sku: true,
       category: true,
       netCents: true,
     },
   });
 
-  const ty = aggregateWindow(rows, range);
-  const ly = aggregateWindow(rows, lyRange);
+  // One identity across both windows so a product's TY and LY land on the
+  // same key — otherwise the LY lookup in `topProducts` silently misses.
+  const identity = resolveProductIdentity(rows, await loadShopifyBridge(shop));
+  const ty = aggregateWindow(rows, range, identity);
+  const ly = aggregateWindow(rows, lyRange, identity);
 
   const salesByChannel = [...ty.netByChannel.entries()]
     .map(([channel, tyNet]) => {

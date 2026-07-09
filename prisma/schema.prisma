@@ -87,8 +87,14 @@ model SalesLine {
   occurredAt    DateTime
   day           String // YYYY-MM-DD, America/New_York
   sku           String?
-  itemName      String
+  itemName      String // as sold: the order line's snapshot name, kept for audit
   variationName String?
+  // Stable product identity from the *current* catalog, unlike itemName:
+  // "sq:<catalog item id>" / "sh:<product gid>". A Square item's variations
+  // (the sizes) share one productKey, so grouping by it separates products
+  // without splitting sizes. Null for custom/uncatalogued lines.
+  productKey    String?
+  productTitle  String? // current catalog name for productKey
   category      String? // Square category name / Shopify product type
   quantity      Float // signed; Square quantities can be fractional
   grossCents    Int // signed
@@ -100,6 +106,7 @@ model SalesLine {
   @@index([shop, day])
   @@index([shop, channel, day])
   @@index([shop, category, day])
+  @@index([shop, productKey])
 }
 
 // Progress per sync job (id = `${shop}:${key}`), so long backfills are

@@ -8,19 +8,28 @@ import {
   type ComparisonMode,
   type DayRange,
 } from "../../lib/periods";
-import { productName, skuFamily } from "../../lib/sku-scheme";
+import {
+  loadShopifyBridge,
+  resolveProductIdentity,
+  type IdentityLine,
+  type ProductIdentity,
+} from "./product-identity";
 
 // Product-selling report: every product in one category, net sales + units,
 // TY vs calendar-aligned LY, per channel and combined. Mirrors the manual
 // "Product Selling" workbooks' methodology notes:
-// - Net = Gross − Discounts, pre-tax.
-// - Square channels (WV/EV) exclude invoiced orders (channel != INVOICED
-//   is structural) and do NOT net refunds into product dollars (order-level
-//   Square refunds can't be attributed to items; documented in the manuals).
+// - Net = Gross − Discounts, pre-tax, after returns. Square returns arrive as
+//   itemized `return_line_items` carrying their own SKU, category and
+//   channel, so they net into the product they were returned from — the same
+//   rule the Top10, weekly and chart reports already follow.
+// - Units are gross units sold (the workbooks' "Units Sold"): a return nets
+//   the dollars but not the unit count.
+// - Square channels (WV/EV) exclude invoiced orders (channel != INVOICED is
+//   structural).
 // - Shopify (ECOM) figures come from the agreements ledger, which already
 //   nets returns the way Shopify Analytics does.
-// - Cross-channel identity: SKU family first (first 4 digits of the 6-digit
-//   scheme = category+family, sizes/variants combined), name as fallback.
+// - Cross-channel identity: the catalog's own product key, bridged across
+//   channels by shared SKU (see ./product-identity).
 
 export interface ProductCell {
   net: number; // cents
@@ -29,7 +38,7 @@ export interface ProductCell {
 
 export interface ProductRow {
   name: string;
-  familyKey: string;
+  productKey: string;
   ty: ProductCell;
   ly: ProductCell;
   channels: Record<"WV" | "EV" | "ECOM", { ty: ProductCell; ly: ProductCell }>;
@@ -49,20 +58,23 @@ export interface ProductSellingReport {
 
 const CHANNELS = ["WV", "EV", "ECOM"] as const;
 
+type ReportLine = IdentityLine & {
+  channel: string;
+  kind: string;
+  quantity: number;
+};
+
 interface Accumulator {
-  name: string;
-  familyKey: string;
+  productKey: string;
   cells: Map<string, ProductCell>; // `${channel}:${year}` -> cell
 }
 
-async function accumulate(
+async function fetchLines(
   shop: string,
   scope: ProductReportScope,
   range: DayRange,
-  year: "ty" | "ly",
-  products: Map<string, Accumulator>,
-): Promise<void> {
-  const lines = await prisma.salesLine.findMany({
+): Promise<ReportLine[]> {
+  return prisma.salesLine.findMany({
     where: {
       shop,
       day: { gte: range.start, lte: range.end },
@@ -73,8 +85,6 @@ async function accumulate(
                 source: "square",
                 channel: { in: ["WV", "EV"] },
                 category: scope.squareCategory,
-                // Square product dollars exclude refunds (see header note).
-                kind: "sale",
               },
             ]
           : []),
@@ -89,28 +99,37 @@ async function accumulate(
       ],
     },
     select: {
+      source: true,
       channel: true,
+      kind: true,
       itemName: true,
       variationName: true,
+      productKey: true,
+      productTitle: true,
       sku: true,
       quantity: true,
       netCents: true,
     },
   });
+}
 
+function accumulate(
+  lines: ReportLine[],
+  year: "ty" | "ly",
+  identity: ProductIdentity,
+  products: Map<string, Accumulator>,
+): void {
   for (const line of lines) {
-    const name = productName(line.itemName, line.variationName);
-    const family = skuFamily(line.sku);
-    const key = family ?? `name:${name.toLowerCase()}`;
+    const key = identity.keyOf(line);
     let acc = products.get(key);
     if (!acc) {
-      acc = { name, familyKey: key, cells: new Map() };
+      acc = { productKey: key, cells: new Map() };
       products.set(key, acc);
     }
     const cellKey = `${line.channel}:${year}`;
     const cell = acc.cells.get(cellKey) ?? { net: 0, units: 0 };
     cell.net += line.netCents;
-    cell.units += line.quantity;
+    if (line.kind === "sale") cell.units += line.quantity;
     acc.cells.set(cellKey, cell);
   }
 }
@@ -129,9 +148,18 @@ export async function computeProductSellingReport(
 ): Promise<ProductSellingReport> {
   const scope = productReportScope(scopeKey);
   const lyRange = comparisonRange(compare, range);
+  const [tyLines, lyLines, bridge] = await Promise.all([
+    fetchLines(shop, scope, range),
+    fetchLines(shop, scope, lyRange),
+    loadShopifyBridge(shop),
+  ]);
+
+  // One identity over both windows, so a product keeps the same row (and the
+  // same label) whether it sold this year, last year, or both.
+  const identity = resolveProductIdentity([...tyLines, ...lyLines], bridge);
   const products = new Map<string, Accumulator>();
-  await accumulate(shop, scope, range, "ty", products);
-  await accumulate(shop, scope, lyRange, "ly", products);
+  accumulate(tyLines, "ty", identity, products);
+  accumulate(lyLines, "ly", identity, products);
 
   const empty = (): ProductCell => ({ net: 0, units: 0 });
   const rows: ProductRow[] = [...products.values()].map((acc) => {
@@ -146,8 +174,8 @@ export async function computeProductSellingReport(
         empty(),
       );
     return {
-      name: acc.name,
-      familyKey: acc.familyKey,
+      name: identity.titleOf(acc.productKey),
+      productKey: acc.productKey,
       ty: sum("ty"),
       ly: sum("ly"),
       channels: {

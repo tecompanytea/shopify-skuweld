@@ -15,6 +15,9 @@ type Line = {
   orderId: string;
   itemName: string;
   variationName: string | null;
+  productKey: string | null;
+  productTitle: string | null;
+  sku: string | null;
   category: string | null;
   netCents: number;
 };
@@ -27,6 +30,9 @@ const line = (over: Partial<Line>): Line => ({
   orderId: "1",
   itemName: "Jade Oolong",
   variationName: "2 oz",
+  productKey: null,
+  productTitle: null,
+  sku: null,
   category: "Retail Loose Leaf Tea",
   netCents: 1000,
   ...over,
@@ -34,9 +40,15 @@ const line = (over: Partial<Line>): Line => ({
 
 const RANGE = { start: "2026-06-08", end: "2026-06-10" };
 
+// The Shopify bridge query is the one without a day window.
+const setRows = (rows: Line[]) =>
+  findMany.mockImplementation((args) =>
+    Promise.resolve(args.distinct ? [] : rows),
+  );
+
 beforeEach(() => {
   findMany.mockReset();
-  findMany.mockResolvedValue([
+  setRows([
     // One two-line order: contributes $15 once to the AOV denominator.
     line({ orderId: "ty-1", itemName: "Jade Oolong", netCents: 1000 }),
     line({ orderId: "ty-1", itemName: "Jade Oolong", netCents: 500 }),
@@ -135,5 +147,39 @@ describe("computeAnalyticsChartSummary", () => {
         ["Pineapple Linzer Cookie", 2500, 0],
       ].sort((a, b) => Number(b[1]) - Number(a[1])),
     );
+  });
+
+  // The POS button and the web product spell the same tea differently; the
+  // bar chart used to show them as two products.
+  it("merges a product across channels by catalog identity, not by name", async () => {
+    setRows([
+      line({
+        itemName: "Mt Ali",
+        productKey: "sq:item-ali",
+        productTitle: "Mt Ali",
+        sku: "101002",
+        netCents: 1000,
+      }),
+      line({
+        source: "shopify",
+        channel: "ECOM",
+        orderId: "ty-2",
+        itemName: "Mount A-Li - 2 oz",
+        variationName: "2 oz",
+        productKey: "sh:gid/9",
+        productTitle: "Mount A-Li",
+        sku: "101002",
+        category: "Loose Leaf",
+        netCents: 4000,
+      }),
+    ]);
+    const summary = await computeAnalyticsChartSummary(
+      "s",
+      RANGE,
+      "previous-year-dow",
+    );
+    expect(summary.topProducts.map((row) => [row.name, row.ty])).toEqual([
+      ["Mount A-Li", 5000],
+    ]);
   });
 });
