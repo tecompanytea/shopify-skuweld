@@ -40,6 +40,7 @@ const AVG_ROWS: GroupedRow[] = [
   { channel: "WV", category: "Retail Loose Leaf Tea", _sum: { netCents: 60000 } },
   { channel: "EV", category: "Retail Snacks", _sum: { netCents: 30000 } },
   { channel: "ECOM", category: "Loose Leaf", _sum: { netCents: 12000 } },
+  { channel: "INVOICED", category: null, _sum: { netCents: 4200 } },
 ];
 
 beforeEach(() => {
@@ -91,12 +92,24 @@ describe("computeWeeklyReport", () => {
       (c) => c.row.key === "Retail Loose Leaf Tea",
     )!;
     // Window totals / 6: WV 60000, bridged ECOM 12000; EV had no tea sales.
-    expect(tea.avg6).toEqual({ wv: 10000, ev: 0, ecom: 2000 });
+    expect(tea.avg6).toEqual({ total: 12000, wv: 10000, ev: 0, ecom: 2000 });
     const snacks = report.categories.find((c) => c.row.key === "Retail Snacks")!;
-    expect(snacks.avg6).toEqual({ wv: 0, ev: 5000, ecom: 0 });
+    expect(snacks.avg6).toEqual({ total: 5000, wv: 0, ev: 5000, ecom: 0 });
     // Sections and the grand total sum their categories' averages.
-    expect(report.sections.retail.avg6).toEqual({ wv: 10000, ev: 5000, ecom: 2000 });
-    expect(report.grand.avg6).toEqual({ wv: 10000, ev: 5000, ecom: 2000 });
+    expect(report.sections.retail.avg6).toEqual({
+      total: 17000,
+      wv: 10000,
+      ev: 5000,
+      ecom: 2000,
+    });
+    expect(report.grand.avg6).toEqual({
+      total: 17000,
+      wv: 10000,
+      ev: 5000,
+      ecom: 2000,
+    });
+    // Invoiced averages separately — it never joins the categorized roll-ups.
+    expect(report.invoicedAvg6).toBe(700);
   });
 
   it("sections and groups each partition the categories to the same grand total", async () => {

@@ -90,17 +90,15 @@ function writeWeeklySheet(
   const sheet = workbook.addWorksheet(title);
   sheet.views = [{ showGridLines: false }]; // white background; only drawn borders show
   sheet.getColumn(1).width = 26;
-  // Money tables (B–P) and the Distribution percentages (S–W) center their
-  // headers and numbers; the label columns (A, R) and the gap (Q) stay default.
-  for (let c = 2; c <= 16; c += 1) {
+  // Money tables (B–Q) and the Distribution percentages (T–X) center their
+  // headers and numbers; the label columns (A, S) and the gap (R) stay default.
+  for (let c = 2; c <= 17; c += 1) {
     sheet.getColumn(c).width = 12;
     sheet.getColumn(c).alignment = { horizontal: "center" };
   }
-  // The AVG LAST 6 WK columns need extra width for their header text.
-  for (const c of [7, 11, 15]) sheet.getColumn(c).width = 14;
-  sheet.getColumn(17).width = 3; // gap between By Category and Distribution
-  sheet.getColumn(18).width = 22; // Distribution row labels
-  for (const c of [19, 20, 21, 22, 23]) {
+  sheet.getColumn(18).width = 3; // gap between By Category and Distribution
+  sheet.getColumn(19).width = 22; // Distribution row labels
+  for (const c of [20, 21, 22, 23, 24]) {
     sheet.getColumn(c).width = 8;
     sheet.getColumn(c).alignment = { horizontal: "center" };
   }
@@ -122,57 +120,65 @@ function writeWeeklySheet(
   lyDateRow.getCell(2).alignment = { horizontal: "left" };
   sheet.addRow([]);
 
-  const channelHeader = sheet.addRow(["BY CHANNEL", "TY", "LY", "% to LY"]);
+  const channelHeader = sheet.addRow([
+    "BY CHANNEL",
+    "TY",
+    "LY",
+    "AVG 6 WK",
+    "% to LY",
+  ]);
   channelHeader.font = { bold: true };
-  const { grand, invoiced, totals } = report;
-  const channelRows: Array<[string, CellPair]> = [
-    ["West Village", grand.wv],
-    ["East Village", grand.ev],
-    ["E-Commerce", grand.ecom],
-    ["Invoiced", invoiced],
-    ["TOTAL w.o. Inv", grand.total],
-    ["TOTAL w.o. Ecomm", totals.woEcom],
-    ["TOTAL", totals.all],
+  const { grand, invoiced, invoicedAvg6, totals } = report;
+  const channelRows: Array<[string, CellPair, number]> = [
+    ["West Village", grand.wv, grand.avg6.wv],
+    ["East Village", grand.ev, grand.avg6.ev],
+    ["E-Commerce", grand.ecom, grand.avg6.ecom],
+    ["Invoiced", invoiced, invoicedAvg6],
+    ["TOTAL w.o. Inv", grand.total, grand.avg6.total],
+    ["TOTAL w.o. Ecomm", totals.woEcom, grand.avg6.wv + grand.avg6.ev + invoicedAvg6],
+    ["TOTAL", totals.all, grand.avg6.total + invoicedAvg6],
   ];
-  for (const [label, pair] of channelRows) {
+  for (const [label, pair, avg6] of channelRows) {
     const row = sheet.addRow([label]);
     if (label.startsWith("TOTAL")) row.font = { bold: true };
     moneyCell(row, 2, pair.ty);
     moneyCell(row, 3, pair.ly);
-    pctCell(row, 4, pair.ty, pair.ly);
-    // All-borders box around the four channel rows (A–D); TOTAL rows excluded.
+    moneyCell(row, 4, avg6);
+    pctCell(row, 5, pair.ty, pair.ly);
+    // All-borders box around the four channel rows (A–E); TOTAL rows excluded.
     if (!label.startsWith("TOTAL")) {
-      for (let c = 1; c <= 4; c += 1) row.getCell(c).border = ALL_BORDERS;
+      for (let c = 1; c <= 5; c += 1) row.getCell(c).border = ALL_BORDERS;
     }
   }
   sheet.addRow([]);
 
-  // By Category (columns A–P) and Distribution (columns R–W) sit side by side
+  // By Category (columns A–Q) and Distribution (columns S–X) sit side by side
   // on shared rows. Distribution prints no grand-total rows, so where By
   // Category prints a TOTAL the Distribution side stays blank — which keeps
   // the two tables row-aligned and supplies the spacing on that side.
-  // Each store channel group carries its trailing-six-week weekly average
-  // (AVG LAST 6 WK) between its LY and % columns.
+  // Every group — TOTAL and each store channel — carries its trailing-six-week
+  // weekly average (AVG 6 WK) between its LY and % columns.
   const catHeader = sheet.addRow([
     "BY CATEGORY",
     "TOTAL TY",
     "TOTAL LY",
+    "AVG 6 WK",
     "% to LY",
     "WV TY",
     "WV LY",
-    "AVG LAST 6 WK",
+    "AVG 6 WK",
     "WV %",
     "EV TY",
     "EV LY",
-    "AVG LAST 6 WK",
+    "AVG 6 WK",
     "EV %",
     "Web TY",
     "Web LY",
-    "AVG LAST 6 WK",
+    "AVG 6 WK",
     "Web %",
   ]);
   ["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"].forEach((h, i) => {
-    catHeader.getCell(18 + i).value = h;
+    catHeader.getCell(19 + i).value = h;
   });
   catHeader.font = { bold: true };
   // All three blocks (categories, sections, groups) foot to the same grand
@@ -187,29 +193,30 @@ function writeWeeklySheet(
   };
   const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
 
-  // Writes the By Category money cells (cols 1–16) onto an existing row.
+  // Writes the By Category money cells (cols 1–17) onto an existing row.
   const catCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
     row.getCell(1).value = label;
     moneyCell(row, 2, c.total.ty);
     moneyCell(row, 3, c.total.ly);
-    pctCell(row, 4, c.total.ty, c.total.ly);
-    moneyCell(row, 5, c.wv.ty);
-    moneyCell(row, 6, c.wv.ly);
-    moneyCell(row, 7, c.avg6.wv);
-    pctCell(row, 8, c.wv.ty, c.wv.ly);
-    moneyCell(row, 9, c.ev.ty);
-    moneyCell(row, 10, c.ev.ly);
-    moneyCell(row, 11, c.avg6.ev);
-    pctCell(row, 12, c.ev.ty, c.ev.ly);
-    moneyCell(row, 13, c.ecom.ty);
-    moneyCell(row, 14, c.ecom.ly);
-    moneyCell(row, 15, c.avg6.ecom);
-    pctCell(row, 16, c.ecom.ty, c.ecom.ly);
+    moneyCell(row, 4, c.avg6.total);
+    pctCell(row, 5, c.total.ty, c.total.ly);
+    moneyCell(row, 6, c.wv.ty);
+    moneyCell(row, 7, c.wv.ly);
+    moneyCell(row, 8, c.avg6.wv);
+    pctCell(row, 9, c.wv.ty, c.wv.ly);
+    moneyCell(row, 10, c.ev.ty);
+    moneyCell(row, 11, c.ev.ly);
+    moneyCell(row, 12, c.avg6.ev);
+    pctCell(row, 13, c.ev.ty, c.ev.ly);
+    moneyCell(row, 14, c.ecom.ty);
+    moneyCell(row, 15, c.ecom.ly);
+    moneyCell(row, 16, c.avg6.ecom);
+    pctCell(row, 17, c.ecom.ty, c.ecom.ly);
   };
 
-  // Writes the Distribution percentage cells (cols 18–23) onto an existing row.
+  // Writes the Distribution percentage cells (cols 19–24) onto an existing row.
   const distCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
-    row.getCell(18).value = label;
+    row.getCell(19).value = label;
     const vals: Array<[number, number]> = [
       [c.total.ty, distDenom.total],
       [c.wv.ty + c.ev.ty, distDenom.strs],
@@ -218,7 +225,7 @@ function writeWeeklySheet(
       [c.ecom.ty, distDenom.web],
     ];
     vals.forEach(([value, denom], i) => {
-      const cell = row.getCell(19 + i);
+      const cell = row.getCell(20 + i);
       cell.value = share(value, denom);
       cell.numFmt = PCT0;
     });
@@ -231,10 +238,10 @@ function writeWeeklySheet(
     if (bold) row.font = { bold: true };
     catCells(row, label, c);
     distCells(row, label, c);
-    // Box each data row across the By Category (A–P) and Distribution (R–W)
-    // tables; column Q is the gap between them, left unboxed.
-    for (let col = 1; col <= 23; col += 1) {
-      if (col !== 17) row.getCell(col).border = ALL_BORDERS;
+    // Box each data row across the By Category (A–Q) and Distribution (S–X)
+    // tables; column R is the gap between them, left unboxed.
+    for (let col = 1; col <= 24; col += 1) {
+      if (col !== 18) row.getCell(col).border = ALL_BORDERS;
     }
     return row;
   };
@@ -270,15 +277,16 @@ function writeWeeklySheet(
   const lastTotal = totalRow(true);
 
   // Medium-weight outside box around the By Category totals (TOTAL TY /
-  // TOTAL LY / % to LY), from the BY CATEGORY header (row 14) down to the
-  // final groups total (row 36 today) — anchored to the rows so it never drifts.
-  outsideBox(sheet, catHeader.number, lastTotal.number, 2, 4);
+  // TOTAL LY / AVG 6 WK / % to LY), from the BY CATEGORY header (row 14) down
+  // to the final groups total (row 36 today) — anchored to the rows so it
+  // never drifts.
+  outsideBox(sheet, catHeader.number, lastTotal.number, 2, 5);
 
   // Medium rules bracketing the Service section (rows 20–22 today) across the
-  // By Category (A–P) and Distribution (R–W) tables — anchored to the section.
+  // By Category (A–Q) and Distribution (S–X) tables — anchored to the section.
   if (firstServiceRow > 0) {
-    const tableCols = Array.from({ length: 23 }, (_, i) => i + 1).filter(
-      (col) => col !== 17,
+    const tableCols = Array.from({ length: 24 }, (_, i) => i + 1).filter(
+      (col) => col !== 18,
     );
     horizontalRule(sheet, firstServiceRow - 1, firstServiceRow, tableCols, "medium");
     horizontalRule(sheet, lastServiceRow, lastServiceRow + 1, tableCols, "medium");
@@ -302,7 +310,7 @@ function writeWeeklySheet(
   };
   for (let r = catHeader.number; r <= lastTotal.number; r += 1) {
     if (!sheet.getRow(r).getCell(1).value) continue; // skip blank separator rows
-    for (const col of [4, 8, 12, 16]) {
+    for (const col of [5, 9, 13, 17]) {
       sheet.getRow(r).getCell(col).fill = pctFill;
     }
   }

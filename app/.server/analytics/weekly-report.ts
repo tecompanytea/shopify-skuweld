@@ -12,7 +12,7 @@ import {
 // store channels come from Square (invoiced excluded), e-commerce from
 // Shopify by product type, invoiced from Square invoices. Each roll-up also
 // carries a per-channel weekly average over the trailing six weeks, for the
-// export's AVG LAST 6 WK columns.
+// export's AVG 6 WK columns.
 
 export interface CellPair {
   ty: number; // cents
@@ -21,7 +21,9 @@ export interface CellPair {
 
 // Average weekly net per store channel over the six weeks ending with the
 // report range (the report week and the five before it). Cents.
+// `total` is wv+ev+ecom, mirroring ChannelCells.total.
 export interface ChannelAvg {
+  total: number;
   wv: number;
   ev: number;
   ecom: number;
@@ -53,6 +55,9 @@ export interface WeeklyReport {
   grand: ChannelCells;
   // Square invoices are never categorized, so they live outside `grand`.
   invoiced: CellPair;
+  // Weekly average of invoiced net over the same trailing six weeks, so the
+  // By Channel table can foot AVG 6 WK on its invoiced-inclusive TOTAL rows.
+  invoicedAvg6: number;
   totals: {
     woEcom: CellPair; // WV + EV + Invoiced
     all: CellPair; // WV + EV + Ecom + Invoiced
@@ -104,7 +109,7 @@ function categoryNet(
 }
 
 const ZERO_PAIR: CellPair = { ty: 0, ly: 0 };
-const ZERO_AVG: ChannelAvg = { wv: 0, ev: 0, ecom: 0 };
+const ZERO_AVG: ChannelAvg = { total: 0, wv: 0, ev: 0, ecom: 0 };
 const addPair = (a: CellPair, b: CellPair): CellPair => ({
   ty: a.ty + b.ty,
   ly: a.ly + b.ly,
@@ -120,6 +125,7 @@ function sumChannelCells(rows: ChannelCells[]): ChannelCells {
       ev: addPair(acc.ev, c.ev),
       ecom: addPair(acc.ecom, c.ecom),
       avg6: {
+        total: acc.avg6.total + c.avg6.total,
         wv: acc.avg6.wv + c.avg6.wv,
         ev: acc.avg6.ev + c.avg6.ev,
         ecom: acc.avg6.ecom + c.avg6.ecom,
@@ -141,7 +147,7 @@ export async function computeWeeklyReport(
   compare: ComparisonMode,
 ): Promise<WeeklyReport> {
   const lyRange = comparisonRange(compare, range);
-  // Six-week window (42 days) ending with the report range, for AVG LAST 6 WK.
+  // Six-week window (42 days) ending with the report range, for AVG 6 WK.
   const avgRange: DayRange = {
     start: shiftDay(range.end, -41),
     end: range.end,
@@ -171,14 +177,18 @@ export async function computeWeeklyReport(
         0,
       ),
     };
+    const avgWv = categoryNet(avg, "WV", row.squareCategory) / 6;
+    const avgEv = categoryNet(avg, "EV", row.squareCategory) / 6;
+    const avgEcom =
+      row.shopifyProductTypes.reduce(
+        (sum, type) => sum + categoryNet(avg, "ECOM", type),
+        0,
+      ) / 6;
     const avg6: ChannelAvg = {
-      wv: categoryNet(avg, "WV", row.squareCategory) / 6,
-      ev: categoryNet(avg, "EV", row.squareCategory) / 6,
-      ecom:
-        row.shopifyProductTypes.reduce(
-          (sum, type) => sum + categoryNet(avg, "ECOM", type),
-          0,
-        ) / 6,
+      total: avgWv + avgEv + avgEcom,
+      wv: avgWv,
+      ev: avgEv,
+      ecom: avgEcom,
     };
     return {
       row,
@@ -208,6 +218,7 @@ export async function computeWeeklyReport(
     ty: ty.byChannel.get("INVOICED") ?? 0,
     ly: ly.byChannel.get("INVOICED") ?? 0,
   };
+  const invoicedAvg6 = (avg.byChannel.get("INVOICED") ?? 0) / 6;
 
   return {
     range,
@@ -215,6 +226,7 @@ export async function computeWeeklyReport(
     compare,
     grand,
     invoiced,
+    invoicedAvg6,
     totals: {
       woEcom: addPair(addPair(grand.wv, grand.ev), invoiced),
       all: addPair(grand.total, invoiced),
