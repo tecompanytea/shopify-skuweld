@@ -97,7 +97,7 @@ function writeWeeklySheet(
     sheet.getColumn(c).alignment = { horizontal: "center" };
   }
   // The AVG LAST 6 WK columns need extra width for their header text.
-  for (const c of [8, 12, 16]) sheet.getColumn(c).width = 14;
+  for (const c of [7, 11, 15]) sheet.getColumn(c).width = 14;
   sheet.getColumn(17).width = 3; // gap between By Category and Distribution
   sheet.getColumn(18).width = 22; // Distribution row labels
   for (const c of [19, 20, 21, 22, 23]) {
@@ -152,7 +152,7 @@ function writeWeeklySheet(
   // Category prints a TOTAL the Distribution side stays blank — which keeps
   // the two tables row-aligned and supplies the spacing on that side.
   // Each store channel group carries its trailing-six-week weekly average
-  // (AVG LAST 6 WK) after its % column.
+  // (AVG LAST 6 WK) between its LY and % columns.
   const catHeader = sheet.addRow([
     "BY CATEGORY",
     "TOTAL TY",
@@ -160,16 +160,16 @@ function writeWeeklySheet(
     "% to LY",
     "WV TY",
     "WV LY",
-    "WV %",
     "AVG LAST 6 WK",
+    "WV %",
     "EV TY",
     "EV LY",
-    "EV %",
     "AVG LAST 6 WK",
+    "EV %",
     "Web TY",
     "Web LY",
-    "Web %",
     "AVG LAST 6 WK",
+    "Web %",
   ]);
   ["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"].forEach((h, i) => {
     catHeader.getCell(18 + i).value = h;
@@ -195,16 +195,16 @@ function writeWeeklySheet(
     pctCell(row, 4, c.total.ty, c.total.ly);
     moneyCell(row, 5, c.wv.ty);
     moneyCell(row, 6, c.wv.ly);
-    pctCell(row, 7, c.wv.ty, c.wv.ly);
-    moneyCell(row, 8, c.avg6.wv);
+    moneyCell(row, 7, c.avg6.wv);
+    pctCell(row, 8, c.wv.ty, c.wv.ly);
     moneyCell(row, 9, c.ev.ty);
     moneyCell(row, 10, c.ev.ly);
-    pctCell(row, 11, c.ev.ty, c.ev.ly);
-    moneyCell(row, 12, c.avg6.ev);
+    moneyCell(row, 11, c.avg6.ev);
+    pctCell(row, 12, c.ev.ty, c.ev.ly);
     moneyCell(row, 13, c.ecom.ty);
     moneyCell(row, 14, c.ecom.ly);
-    pctCell(row, 15, c.ecom.ty, c.ecom.ly);
-    moneyCell(row, 16, c.avg6.ecom);
+    moneyCell(row, 15, c.avg6.ecom);
+    pctCell(row, 16, c.ecom.ty, c.ecom.ly);
   };
 
   // Writes the Distribution percentage cells (cols 18–23) onto an existing row.
@@ -302,7 +302,7 @@ function writeWeeklySheet(
   };
   for (let r = catHeader.number; r <= lastTotal.number; r += 1) {
     if (!sheet.getRow(r).getCell(1).value) continue; // skip blank separator rows
-    for (const col of [4, 7, 11, 15]) {
+    for (const col of [4, 8, 12, 16]) {
       sheet.getRow(r).getCell(col).fill = pctFill;
     }
   }
