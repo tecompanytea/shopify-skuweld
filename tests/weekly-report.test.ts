@@ -34,11 +34,21 @@ const LY_ROWS: GroupedRow[] = [
   { channel: "INVOICED", category: null, _sum: { netCents: 1000 } },
 ];
 
+// Trailing six-week window: 42 days ending with the report range.
+const AVG_START = "2026-05-18"; // RANGE.end - 41 days
+const AVG_ROWS: GroupedRow[] = [
+  { channel: "WV", category: "Retail Loose Leaf Tea", _sum: { netCents: 60000 } },
+  { channel: "EV", category: "Retail Snacks", _sum: { netCents: 30000 } },
+  { channel: "ECOM", category: "Loose Leaf", _sum: { netCents: 12000 } },
+];
+
 beforeEach(() => {
   groupBy.mockReset();
-  groupBy.mockImplementation(({ where }) =>
-    Promise.resolve(where.day.gte === RANGE.start ? TY_ROWS : LY_ROWS),
-  );
+  groupBy.mockImplementation(({ where }) => {
+    if (where.day.gte === RANGE.start) return Promise.resolve(TY_ROWS);
+    if (where.day.gte === AVG_START) return Promise.resolve(AVG_ROWS);
+    return Promise.resolve(LY_ROWS);
+  });
 });
 
 describe("computeWeeklyReport", () => {
@@ -73,6 +83,20 @@ describe("computeWeeklyReport", () => {
     expect(report.invoiced).toEqual({ ty: 7000, ly: 1000 });
     expect(report.totals.woEcom).toEqual({ ty: 26000, ly: 9000 });
     expect(report.totals.all).toEqual({ ty: 31000, ly: 9000 });
+  });
+
+  it("averages the six weeks ending with the report week, per channel", async () => {
+    const report = await computeWeeklyReport("s", RANGE, "previous-year-dow");
+    const tea = report.categories.find(
+      (c) => c.row.key === "Retail Loose Leaf Tea",
+    )!;
+    // Window totals / 6: WV 60000, bridged ECOM 12000; EV had no tea sales.
+    expect(tea.avg6).toEqual({ wv: 10000, ev: 0, ecom: 2000 });
+    const snacks = report.categories.find((c) => c.row.key === "Retail Snacks")!;
+    expect(snacks.avg6).toEqual({ wv: 0, ev: 5000, ecom: 0 });
+    // Sections and the grand total sum their categories' averages.
+    expect(report.sections.retail.avg6).toEqual({ wv: 10000, ev: 5000, ecom: 2000 });
+    expect(report.grand.avg6).toEqual({ wv: 10000, ev: 5000, ecom: 2000 });
   });
 
   it("sections and groups each partition the categories to the same grand total", async () => {

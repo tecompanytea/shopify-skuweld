@@ -90,15 +90,17 @@ function writeWeeklySheet(
   const sheet = workbook.addWorksheet(title);
   sheet.views = [{ showGridLines: false }]; // white background; only drawn borders show
   sheet.getColumn(1).width = 26;
-  // Money tables (B–M) and the Distribution percentages (P–T) center their
-  // headers and numbers; the label columns (A, O) and the gap (N) stay default.
-  for (const c of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) {
+  // Money tables (B–P) and the Distribution percentages (S–W) center their
+  // headers and numbers; the label columns (A, R) and the gap (Q) stay default.
+  for (let c = 2; c <= 16; c += 1) {
     sheet.getColumn(c).width = 12;
     sheet.getColumn(c).alignment = { horizontal: "center" };
   }
-  sheet.getColumn(14).width = 3; // gap between By Category and Distribution
-  sheet.getColumn(15).width = 22; // Distribution row labels
-  for (const c of [16, 17, 18, 19, 20]) {
+  // The AVG LAST 6 WK columns need extra width for their header text.
+  for (const c of [8, 12, 16]) sheet.getColumn(c).width = 14;
+  sheet.getColumn(17).width = 3; // gap between By Category and Distribution
+  sheet.getColumn(18).width = 22; // Distribution row labels
+  for (const c of [19, 20, 21, 22, 23]) {
     sheet.getColumn(c).width = 8;
     sheet.getColumn(c).alignment = { horizontal: "center" };
   }
@@ -145,10 +147,12 @@ function writeWeeklySheet(
   }
   sheet.addRow([]);
 
-  // By Category (columns A–M) and Distribution (columns O–T) sit side by side
+  // By Category (columns A–P) and Distribution (columns R–W) sit side by side
   // on shared rows. Distribution prints no grand-total rows, so where By
   // Category prints a TOTAL the Distribution side stays blank — which keeps
   // the two tables row-aligned and supplies the spacing on that side.
+  // Each store channel group carries its trailing-six-week weekly average
+  // (AVG LAST 6 WK) after its % column.
   const catHeader = sheet.addRow([
     "BY CATEGORY",
     "TOTAL TY",
@@ -157,15 +161,18 @@ function writeWeeklySheet(
     "WV TY",
     "WV LY",
     "WV %",
+    "AVG LAST 6 WK",
     "EV TY",
     "EV LY",
     "EV %",
+    "AVG LAST 6 WK",
     "Web TY",
     "Web LY",
     "Web %",
+    "AVG LAST 6 WK",
   ]);
   ["DISTRIBUTION", "TOTAL", "STRS", "WV", "EV", "WEB"].forEach((h, i) => {
-    catHeader.getCell(15 + i).value = h;
+    catHeader.getCell(18 + i).value = h;
   });
   catHeader.font = { bold: true };
   // All three blocks (categories, sections, groups) foot to the same grand
@@ -180,7 +187,7 @@ function writeWeeklySheet(
   };
   const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
 
-  // Writes the By Category money cells (cols 1–13) onto an existing row.
+  // Writes the By Category money cells (cols 1–16) onto an existing row.
   const catCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
     row.getCell(1).value = label;
     moneyCell(row, 2, c.total.ty);
@@ -189,17 +196,20 @@ function writeWeeklySheet(
     moneyCell(row, 5, c.wv.ty);
     moneyCell(row, 6, c.wv.ly);
     pctCell(row, 7, c.wv.ty, c.wv.ly);
-    moneyCell(row, 8, c.ev.ty);
-    moneyCell(row, 9, c.ev.ly);
-    pctCell(row, 10, c.ev.ty, c.ev.ly);
-    moneyCell(row, 11, c.ecom.ty);
-    moneyCell(row, 12, c.ecom.ly);
-    pctCell(row, 13, c.ecom.ty, c.ecom.ly);
+    moneyCell(row, 8, c.avg6.wv);
+    moneyCell(row, 9, c.ev.ty);
+    moneyCell(row, 10, c.ev.ly);
+    pctCell(row, 11, c.ev.ty, c.ev.ly);
+    moneyCell(row, 12, c.avg6.ev);
+    moneyCell(row, 13, c.ecom.ty);
+    moneyCell(row, 14, c.ecom.ly);
+    pctCell(row, 15, c.ecom.ty, c.ecom.ly);
+    moneyCell(row, 16, c.avg6.ecom);
   };
 
-  // Writes the Distribution percentage cells (cols 15–20) onto an existing row.
+  // Writes the Distribution percentage cells (cols 18–23) onto an existing row.
   const distCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
-    row.getCell(15).value = label;
+    row.getCell(18).value = label;
     const vals: Array<[number, number]> = [
       [c.total.ty, distDenom.total],
       [c.wv.ty + c.ev.ty, distDenom.strs],
@@ -208,7 +218,7 @@ function writeWeeklySheet(
       [c.ecom.ty, distDenom.web],
     ];
     vals.forEach(([value, denom], i) => {
-      const cell = row.getCell(16 + i);
+      const cell = row.getCell(19 + i);
       cell.value = share(value, denom);
       cell.numFmt = PCT0;
     });
@@ -221,10 +231,10 @@ function writeWeeklySheet(
     if (bold) row.font = { bold: true };
     catCells(row, label, c);
     distCells(row, label, c);
-    // Box each data row across the By Category (A–M) and Distribution (O–T)
-    // tables; column N is the gap between them, left unboxed.
-    for (let col = 1; col <= 20; col += 1) {
-      if (col !== 14) row.getCell(col).border = ALL_BORDERS;
+    // Box each data row across the By Category (A–P) and Distribution (R–W)
+    // tables; column Q is the gap between them, left unboxed.
+    for (let col = 1; col <= 23; col += 1) {
+      if (col !== 17) row.getCell(col).border = ALL_BORDERS;
     }
     return row;
   };
@@ -265,10 +275,10 @@ function writeWeeklySheet(
   outsideBox(sheet, catHeader.number, lastTotal.number, 2, 4);
 
   // Medium rules bracketing the Service section (rows 20–22 today) across the
-  // By Category (A–M) and Distribution (O–T) tables — anchored to the section.
+  // By Category (A–P) and Distribution (R–W) tables — anchored to the section.
   if (firstServiceRow > 0) {
-    const tableCols = Array.from({ length: 20 }, (_, i) => i + 1).filter(
-      (col) => col !== 14,
+    const tableCols = Array.from({ length: 23 }, (_, i) => i + 1).filter(
+      (col) => col !== 17,
     );
     horizontalRule(sheet, firstServiceRow - 1, firstServiceRow, tableCols, "medium");
     horizontalRule(sheet, lastServiceRow, lastServiceRow + 1, tableCols, "medium");
@@ -292,7 +302,7 @@ function writeWeeklySheet(
   };
   for (let r = catHeader.number; r <= lastTotal.number; r += 1) {
     if (!sheet.getRow(r).getCell(1).value) continue; // skip blank separator rows
-    for (const col of [4, 7, 10, 13]) {
+    for (const col of [4, 7, 11, 15]) {
       sheet.getRow(r).getCell(col).fill = pctFill;
     }
   }

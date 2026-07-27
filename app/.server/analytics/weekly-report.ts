@@ -2,6 +2,7 @@ import prisma from "../../db.server";
 import { CATEGORY_ROWS, type CategoryRow } from "./categories";
 import {
   comparisonRange,
+  shiftDay,
   type ComparisonMode,
   type DayRange,
 } from "../../lib/periods";
@@ -9,11 +10,21 @@ import {
 // Computes the Weekly Meeting Report: net sales by channel and by category,
 // this-year vs weekday-aligned last-year. Reproduces the manual template:
 // store channels come from Square (invoiced excluded), e-commerce from
-// Shopify by product type, invoiced from Square invoices.
+// Shopify by product type, invoiced from Square invoices. Each roll-up also
+// carries a per-channel weekly average over the trailing six weeks, for the
+// export's AVG LAST 6 WK columns.
 
 export interface CellPair {
   ty: number; // cents
   ly: number; // cents
+}
+
+// Average weekly net per store channel over the six weeks ending with the
+// report range (the report week and the five before it). Cents.
+export interface ChannelAvg {
+  wv: number;
+  ev: number;
+  ecom: number;
 }
 
 // A roll-up's net split across the store channels. `total` is wv+ev+ecom;
@@ -25,6 +36,7 @@ export interface ChannelCells {
   wv: CellPair;
   ev: CellPair;
   ecom: CellPair;
+  avg6: ChannelAvg;
 }
 
 export interface CategoryReportRow extends ChannelCells {
@@ -92,6 +104,7 @@ function categoryNet(
 }
 
 const ZERO_PAIR: CellPair = { ty: 0, ly: 0 };
+const ZERO_AVG: ChannelAvg = { wv: 0, ev: 0, ecom: 0 };
 const addPair = (a: CellPair, b: CellPair): CellPair => ({
   ty: a.ty + b.ty,
   ly: a.ly + b.ly,
@@ -106,8 +119,19 @@ function sumChannelCells(rows: ChannelCells[]): ChannelCells {
       wv: addPair(acc.wv, c.wv),
       ev: addPair(acc.ev, c.ev),
       ecom: addPair(acc.ecom, c.ecom),
+      avg6: {
+        wv: acc.avg6.wv + c.avg6.wv,
+        ev: acc.avg6.ev + c.avg6.ev,
+        ecom: acc.avg6.ecom + c.avg6.ecom,
+      },
     }),
-    { total: ZERO_PAIR, wv: ZERO_PAIR, ev: ZERO_PAIR, ecom: ZERO_PAIR },
+    {
+      total: ZERO_PAIR,
+      wv: ZERO_PAIR,
+      ev: ZERO_PAIR,
+      ecom: ZERO_PAIR,
+      avg6: ZERO_AVG,
+    },
   );
 }
 
@@ -117,9 +141,15 @@ export async function computeWeeklyReport(
   compare: ComparisonMode,
 ): Promise<WeeklyReport> {
   const lyRange = comparisonRange(compare, range);
-  const [ty, ly] = await Promise.all([
+  // Six-week window (42 days) ending with the report range, for AVG LAST 6 WK.
+  const avgRange: DayRange = {
+    start: shiftDay(range.end, -41),
+    end: range.end,
+  };
+  const [ty, ly, avg] = await Promise.all([
     sumRange(shop, range),
     sumRange(shop, lyRange),
+    sumRange(shop, avgRange),
   ]);
 
   const categories: CategoryReportRow[] = CATEGORY_ROWS.map((row) => {
@@ -141,11 +171,21 @@ export async function computeWeeklyReport(
         0,
       ),
     };
+    const avg6: ChannelAvg = {
+      wv: categoryNet(avg, "WV", row.squareCategory) / 6,
+      ev: categoryNet(avg, "EV", row.squareCategory) / 6,
+      ecom:
+        row.shopifyProductTypes.reduce(
+          (sum, type) => sum + categoryNet(avg, "ECOM", type),
+          0,
+        ) / 6,
+    };
     return {
       row,
       wv,
       ev,
       ecom,
+      avg6,
       total: { ty: wv.ty + ev.ty + ecom.ty, ly: wv.ly + ev.ly + ecom.ly },
     };
   });
