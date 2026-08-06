@@ -139,6 +139,17 @@ describe("gramConversionOf", () => {
         }),
       ),
     ).toEqual({ grams: 4, basis: "TASTING FLIGHT" });
+    expect(
+      gramConversionOf(
+        line({
+          category: "Tasting Flight Tea",
+          itemName: "(missing tasting flight selection)",
+          productTitle: "(missing tasting flight selection)",
+          variationName: "Tasting Flight",
+          sku: null,
+        }),
+      ),
+    ).toEqual({ grams: 4, basis: "TASTING FLIGHT" });
   });
 });
 

@@ -53,10 +53,11 @@ function productText(line: ConvertibleLine): string {
 
 function isExcludedGramLine(line: ConvertibleLine): boolean {
   const product = productText(line);
+  const isFlightSelection = compact(line.category) === "tasting flight tea";
   return (
     /\bsharing pot\b/.test(product) ||
     /\bshopping bags?\b/.test(product) ||
-    /\btasting flight\b/.test(product)
+    (!isFlightSelection && /\btasting flight\b/.test(product))
   );
 }
 
