@@ -13,11 +13,13 @@ import { computeWeeklyReport } from "../.server/analytics/weekly-report";
 import { computeProductSellingReport } from "../.server/analytics/product-selling-report";
 import { computeTop10Report } from "../.server/analytics/top10-report";
 import { computeUnitsBySizeReport } from "../.server/analytics/units-by-size-report";
+import { computeTeaByGramReport } from "../.server/analytics/tea-by-gram-report";
 import {
   buildWeeklyWorkbook,
   buildProductSellingWorkbook,
   buildTop10Workbook,
   buildUnitsBySizeWorkbook,
+  buildTeaByGramWorkbook,
   buildAllReportsWorkbook,
 } from "../.server/analytics/export-xlsx";
 import { PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
@@ -69,6 +71,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const report = await computeUnitsBySizeReport(shop, range);
     buffer = await buildUnitsBySizeWorkbook(report);
     filename = `Loose Leaf Units by Size ${range.start} - ${range.end}.xlsx`;
+  } else if (type === "tea-by-gram") {
+    const report = await computeTeaByGramReport(shop, range);
+    buffer = await buildTeaByGramWorkbook(report);
+    filename = `Tea Usage by Gram ${range.start} - ${range.end}.xlsx`;
   } else if (type === "all") {
     // Per-report comparison: an explicit ?compare= applies everywhere, else
     // each report keeps its own default.
@@ -94,7 +100,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       resolveComparison(url.searchParams, "top10"),
     );
     const units = await computeUnitsBySizeReport(shop, range);
-    buffer = await buildAllReportsWorkbook(weekly, products, top10, units);
+    const grams = await computeTeaByGramReport(shop, range);
+    buffer = await buildAllReportsWorkbook(
+      weekly,
+      products,
+      top10,
+      units,
+      grams,
+    );
     filename = `Te Company Reports ${range.start} - ${range.end}.xlsx`;
   } else {
     throw new Response(`Unknown report type: ${type}`, { status: 400 });

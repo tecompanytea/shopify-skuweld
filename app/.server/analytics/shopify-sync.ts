@@ -1,9 +1,11 @@
 import prisma from "../../db.server";
-import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 import {
-  resolveIncrementalSince,
-  replaceSourceOrders,
-} from "./incremental";
+  toReportDay,
+  rangeToInstants,
+  dayInRange,
+  type DayRange,
+} from "../../lib/periods";
+import { resolveIncrementalSince, replaceSourceOrders } from "./incremental";
 
 // Pulls Shopify sales into the SalesLine fact table (channel ECOM) from the
 // order's *sales agreements* — the same event ledger Shopify Analytics
@@ -48,6 +50,7 @@ interface OrdersQueryResult {
       nodes: Array<{
         id: string;
         test: boolean;
+        cancelledAt: string | null;
         agreements: {
           nodes: Array<{
             id: string;
@@ -71,6 +74,7 @@ const ORDERS_QUERY = `#graphql
       nodes {
         id
         test
+        cancelledAt
         agreements(first: 10) {
           nodes {
             id
@@ -179,7 +183,11 @@ async function collectAgreementRows(
 
     for (const order of orders.nodes) {
       if (order.test) continue;
+      // Keep the order in the replacement scope so a newly-cancelled order's
+      // previously stored lines are deleted, but do not count any of its sales
+      // as product demand or dry-tea usage.
       seenOrderIds.add(order.id);
+      if (order.cancelledAt) continue;
       if (order.agreements.pageInfo.hasNextPage) truncated += 1;
 
       for (const agreement of order.agreements.nodes) {
@@ -282,7 +290,8 @@ export async function syncShopifyOrders(
     });
     await insertRows(rows);
 
-    const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
+    const note =
+      truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
     await setState(
       "done",
       `${range.start} → ${range.end}: ${countedOrders.size} orders, ${rows.length} lines${note}`,
@@ -321,7 +330,8 @@ export async function syncShopifyOrdersIncremental(
           setState("running", `${orders} orders, ${lines} lines so far`),
       );
 
-    const note = truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
+    const note =
+      truncated > 0 ? ` (warning: ${truncated} truncated pages)` : "";
     const completedAt = new Date();
     // Atomic: swap the touched orders' rows AND advance the watermark / mark
     // done in one transaction, so a partial failure rolls back everything and

@@ -62,6 +62,10 @@ import {
   computeUnitsBySizeReport,
   type UnitsBySizeReport,
 } from "../.server/analytics/units-by-size-report";
+import {
+  computeTeaByGramReport,
+  type TeaByGramReport,
+} from "../.server/analytics/tea-by-gram-report";
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 import { formatDay, toReportDay } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
@@ -172,6 +176,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let productSelling: ProductSellingReport | null = null;
   let top10: Top10Report | null = null;
   let unitsBySize: UnitsBySizeReport | null = null;
+  let teaByGram: TeaByGramReport | null = null;
   if (lineCount > 0) {
     if (type === "weekly") {
       [charts, weekly] = await Promise.all([
@@ -198,6 +203,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         computeAnalyticsChartSummary(shop, range, compare),
         computeUnitsBySizeReport(shop, range),
       ]);
+    } else if (type === "tea-by-gram") {
+      teaByGram = await computeTeaByGramReport(shop, range);
     }
   }
 
@@ -217,6 +224,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productSelling,
     top10,
     unitsBySize,
+    teaByGram,
   };
 };
 
@@ -1061,7 +1069,9 @@ function Top10Block({ report }: { report: Top10Report }) {
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="kicker">#</s-table-header>
-              <s-table-header listSlot="primary">Top 10 products</s-table-header>
+              <s-table-header listSlot="primary">
+                Top 10 products
+              </s-table-header>
               <s-table-header listSlot="labeled">Net $</s-table-header>
               <s-table-header listSlot="labeled">Units</s-table-header>
             </s-table-header-row>
@@ -1110,6 +1120,178 @@ function UnitsBySizeBlock({ report }: { report: UnitsBySizeReport }) {
           ))}
       </s-table-body>
     </s-table>
+  );
+}
+
+function numberLabel(value: number, maximumFractionDigits = 2): string {
+  return value.toLocaleString("en-US", { maximumFractionDigits });
+}
+
+function TeaByGramBlock({ report }: { report: TeaByGramReport }) {
+  return (
+    <s-stack direction="block" gap="base">
+      <s-box padding="base">
+        <s-paragraph>
+          Positive sales only; refunds do not subtract tea usage. Known gift
+          SKUs are split into their component teas. Sachets are counted as tea
+          bags below and never converted to grams.
+        </s-paragraph>
+      </s-box>
+      <s-table>
+        <s-table-header-row>
+          <s-table-header listSlot="kicker">SKU family</s-table-header>
+          <s-table-header listSlot="primary">Tea</s-table-header>
+          {report.channels.map((channel) => (
+            <s-table-header key={channel} listSlot="labeled" format="numeric">
+              {`${channel} g`}
+            </s-table-header>
+          ))}
+          <s-table-header listSlot="secondary" format="numeric">
+            Total g
+          </s-table-header>
+          <s-table-header listSlot="labeled" format="numeric">
+            Total kg
+          </s-table-header>
+        </s-table-header-row>
+        <s-table-body>
+          {report.rows.map((row) => (
+            <s-table-row key={row.key}>
+              <s-table-cell>{row.skuFamily ?? "Seasonal"}</s-table-cell>
+              <s-table-cell>{row.name}</s-table-cell>
+              {report.channels.map((channel) => (
+                <s-table-cell key={channel}>
+                  {row.byChannel[channel]
+                    ? numberLabel(row.byChannel[channel])
+                    : ""}
+                </s-table-cell>
+              ))}
+              <s-table-cell>{numberLabel(row.totalGrams)}</s-table-cell>
+              <s-table-cell>{numberLabel(row.totalKilograms, 3)}</s-table-cell>
+            </s-table-row>
+          ))}
+          {report.rows.length > 0 && (
+            <s-table-row>
+              <s-table-cell></s-table-cell>
+              <s-table-cell>TOTAL</s-table-cell>
+              {report.channels.map((channel) => (
+                <s-table-cell key={channel}>
+                  {numberLabel(
+                    report.rows.reduce(
+                      (sum, row) => sum + (row.byChannel[channel] ?? 0),
+                      0,
+                    ),
+                  )}
+                </s-table-cell>
+              ))}
+              <s-table-cell>{numberLabel(report.totalGrams)}</s-table-cell>
+              <s-table-cell>
+                {numberLabel(report.totalKilograms, 3)}
+              </s-table-cell>
+            </s-table-row>
+          )}
+        </s-table-body>
+      </s-table>
+
+      {report.teaBagRows.length > 0 && (
+        <s-stack direction="block" gap="base">
+          <s-box padding="base">
+            <s-heading>Tea bags by count</s-heading>
+          </s-box>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">SKU</s-table-header>
+              <s-table-header listSlot="primary">Gift</s-table-header>
+              <s-table-header listSlot="labeled" format="numeric">
+                Bags / gift
+              </s-table-header>
+              {report.channels.map((channel) => (
+                <s-table-header
+                  key={channel}
+                  listSlot="labeled"
+                  format="numeric"
+                >
+                  {`${channel} bags`}
+                </s-table-header>
+              ))}
+              <s-table-header listSlot="secondary" format="numeric">
+                Total tea bags
+              </s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {report.teaBagRows.map((row) => (
+                <s-table-row key={row.sku}>
+                  <s-table-cell>{row.sku}</s-table-cell>
+                  <s-table-cell>{row.gift}</s-table-cell>
+                  <s-table-cell>{numberLabel(row.teaBagsPerUnit)}</s-table-cell>
+                  {report.channels.map((channel) => (
+                    <s-table-cell key={channel}>
+                      {row.byChannel[channel]
+                        ? numberLabel(row.byChannel[channel])
+                        : ""}
+                    </s-table-cell>
+                  ))}
+                  <s-table-cell>{numberLabel(row.totalTeaBags)}</s-table-cell>
+                </s-table-row>
+              ))}
+              <s-table-row>
+                <s-table-cell></s-table-cell>
+                <s-table-cell>TOTAL</s-table-cell>
+                <s-table-cell></s-table-cell>
+                {report.channels.map((channel) => (
+                  <s-table-cell key={channel}>
+                    {numberLabel(
+                      report.teaBagRows.reduce(
+                        (sum, row) => sum + (row.byChannel[channel] ?? 0),
+                        0,
+                      ),
+                    )}
+                  </s-table-cell>
+                ))}
+                <s-table-cell>{numberLabel(report.totalTeaBags)}</s-table-cell>
+              </s-table-row>
+            </s-table-body>
+          </s-table>
+        </s-stack>
+      )}
+
+      {report.unmapped.length > 0 && (
+        <>
+          <s-box padding="base">
+            <s-banner tone="warning">
+              {`${report.unmapped.length} tea SKU/variant combination${
+                report.unmapped.length === 1 ? " needs" : "s need"
+              } review. The export includes the complete audit list.`}
+            </s-banner>
+          </s-box>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">SKU</s-table-header>
+              <s-table-header listSlot="primary">Unmapped tea</s-table-header>
+              <s-table-header listSlot="secondary">Variant</s-table-header>
+              <s-table-header listSlot="labeled">Channel</s-table-header>
+              <s-table-header listSlot="labeled" format="numeric">
+                Units
+              </s-table-header>
+              <s-table-header>Reason</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {report.unmapped.slice(0, 50).map((row) => (
+                <s-table-row
+                  key={`${row.sku}|${row.item}|${row.variant}|${row.channel}|${row.reason}`}
+                >
+                  <s-table-cell>{row.sku}</s-table-cell>
+                  <s-table-cell>{row.item}</s-table-cell>
+                  <s-table-cell>{row.variant || "—"}</s-table-cell>
+                  <s-table-cell>{row.channel}</s-table-cell>
+                  <s-table-cell>{numberLabel(row.units)}</s-table-cell>
+                  <s-table-cell>{row.reason}</s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </>
+      )}
+    </s-stack>
   );
 }
 
@@ -1208,6 +1390,7 @@ export default function Analytics() {
     productSelling,
     top10,
     unitsBySize,
+    teaByGram,
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
@@ -1303,9 +1486,11 @@ export default function Analytics() {
         ? "Category Top 10"
         : type === "units-by-size"
           ? "Loose Leaf — Units by size"
-          : productSelling
-            ? `Product selling — ${productSelling.scope.label}`
-            : "Report";
+          : type === "tea-by-gram"
+            ? "Tea usage — by gram"
+            : productSelling
+              ? `Product selling — ${productSelling.scope.label}`
+              : "Report";
   const freshnessText =
     lastSyncedLabel === null
       ? lineCount === 0
@@ -1386,7 +1571,7 @@ export default function Analytics() {
               setSearchParams(params);
             }}
           />
-          {type !== "units-by-size" && (
+          {type !== "units-by-size" && type !== "tea-by-gram" && (
             <ComparisonPicker
               compare={compare}
               range={range}
@@ -1430,6 +1615,7 @@ export default function Analytics() {
               <s-option value="units-by-size">
                 Loose Leaf — Units by size
               </s-option>
+              <s-option value="tea-by-gram">Tea usage — by gram</s-option>
             </s-select>
           </s-stack>
           {stale ? (
@@ -1529,6 +1715,8 @@ export default function Analytics() {
             <Top10Block report={top10} />
           ) : unitsBySize ? (
             <UnitsBySizeBlock report={unitsBySize} />
+          ) : teaByGram ? (
+            <TeaByGramBlock report={teaByGram} />
           ) : (
             <s-box padding="base">
               <s-paragraph>No sales recorded for this selection.</s-paragraph>

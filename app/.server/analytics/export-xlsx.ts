@@ -1,9 +1,13 @@
 import ExcelJS from "exceljs";
 import { COMPARISON_NOTES } from "../../lib/periods";
 import type { WeeklyReport, CellPair, ChannelCells } from "./weekly-report";
-import type { ProductSellingReport, ProductCell } from "./product-selling-report";
+import type {
+  ProductSellingReport,
+  ProductCell,
+} from "./product-selling-report";
 import { SIZE_COLUMNS, type UnitsBySizeReport } from "./units-by-size-report";
 import type { Top10Report } from "./top10-report";
+import type { TeaByGramReport } from "./tea-by-gram-report";
 
 // Renders reports as .xlsx workbooks shaped like the manual templates.
 // Data fidelity is the contract; styling is intentionally minimal.
@@ -12,6 +16,8 @@ const MONEY = "$#,##0.00";
 const MONEY0 = "$#,##0";
 const PCT = "0.0%";
 const PCT0 = "0%"; // Distribution mix is whole-percent, like the manual sheet
+const GRAMS = "#,##0.##";
+const KILOGRAMS = "#,##0.000";
 
 // "All borders" (dotted hairline) for boxed table blocks, applied per cell.
 const ALL_BORDERS: Partial<ExcelJS.Borders> = {
@@ -178,7 +184,8 @@ function writeWeeklySheet(
     ev: grand.ev.ty,
     web: grand.ecom.ty,
   };
-  const share = (value: number, denom: number) => (denom === 0 ? 0 : value / denom);
+  const share = (value: number, denom: number) =>
+    denom === 0 ? 0 : value / denom;
 
   // Writes the By Category money cells (cols 1–13) onto an existing row.
   const catCells = (row: ExcelJS.Row, label: string, c: ChannelCells) => {
@@ -270,8 +277,20 @@ function writeWeeklySheet(
     const tableCols = Array.from({ length: 20 }, (_, i) => i + 1).filter(
       (col) => col !== 14,
     );
-    horizontalRule(sheet, firstServiceRow - 1, firstServiceRow, tableCols, "medium");
-    horizontalRule(sheet, lastServiceRow, lastServiceRow + 1, tableCols, "medium");
+    horizontalRule(
+      sheet,
+      firstServiceRow - 1,
+      firstServiceRow,
+      tableCols,
+      "medium",
+    );
+    horizontalRule(
+      sheet,
+      lastServiceRow,
+      lastServiceRow + 1,
+      tableCols,
+      "medium",
+    );
   }
 
   // Weekly meeting report shows whole dollars and whole percents (no decimals).
@@ -334,7 +353,8 @@ export async function buildProductSellingWorkbook(
     ["ALL", "ALL CHANNELS"],
   ];
   for (const [key, label] of channelLabels) {
-    if (key === "ECOM" && report.scope.shopifyProductTypes.length === 0) continue;
+    if (key === "ECOM" && report.scope.shopifyProductTypes.length === 0)
+      continue;
     const totals = report.channelTotals[key];
     const row = summary.addRow(["", label]);
     if (key === "ALL") row.font = { bold: true };
@@ -377,7 +397,8 @@ export async function buildProductSellingWorkbook(
       moneyCell(row, 4, r.ty.net);
       const change = pct(r.ty.net, r.ly.net);
       row.getCell(5).value = r.ty.net === 0 && r.ly.net > 0 ? "Gone" : change;
-      if (typeof change === "number" && r.ty.net !== 0) row.getCell(5).numFmt = PCT;
+      if (typeof change === "number" && r.ty.net !== 0)
+        row.getCell(5).numFmt = PCT;
       row.getCell(6).value = r.ly.units;
       row.getCell(7).value = r.ty.units;
       totals = {
@@ -490,6 +511,177 @@ export async function buildUnitsBySizeWorkbook(
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
+function writeTeaByGramSheets(
+  workbook: ExcelJS.Workbook,
+  report: TeaByGramReport,
+  prefix = "",
+): void {
+  const summary = workbook.addWorksheet(`${prefix}Tea by Gram`.slice(0, 31));
+  summary.getColumn(1).width = 12;
+  summary.getColumn(2).width = 36;
+  for (let c = 3; c <= report.channels.length + 4; c += 1) {
+    summary.getColumn(c).width = 13;
+  }
+  summary.addRow([
+    `Tea usage · ${report.range.start} → ${report.range.end} · positive sales only (returns ignored; gift sets decomposed by recipe)`,
+  ]).font = { bold: true };
+  const summaryHeader = summary.addRow([
+    "SKU Family",
+    "Tea",
+    ...report.channels.map((channel) => `${channel} g`),
+    "Total g",
+    "Total kg",
+  ]);
+  summaryHeader.font = { bold: true };
+  for (const reportRow of report.rows) {
+    const row = summary.addRow([
+      reportRow.skuFamily ?? "",
+      reportRow.name,
+      ...report.channels.map((channel) => reportRow.byChannel[channel] ?? 0),
+      reportRow.totalGrams,
+      reportRow.totalKilograms,
+    ]);
+    for (let c = 3; c < row.cellCount; c += 1) row.getCell(c).numFmt = GRAMS;
+    row.getCell(row.cellCount).numFmt = KILOGRAMS;
+  }
+  const total = summary.addRow([
+    "",
+    "TOTAL",
+    ...report.channels.map((channel) =>
+      report.rows.reduce(
+        (sum, reportRow) => sum + (reportRow.byChannel[channel] ?? 0),
+        0,
+      ),
+    ),
+    report.totalGrams,
+    report.totalKilograms,
+  ]);
+  total.font = { bold: true };
+  for (let c = 3; c < total.cellCount; c += 1) total.getCell(c).numFmt = GRAMS;
+  total.getCell(total.cellCount).numFmt = KILOGRAMS;
+
+  const bags = workbook.addWorksheet(`${prefix}Tea Bags by Count`.slice(0, 31));
+  const bagWidths = [14, 42, 14, ...report.channels.map(() => 13), 16];
+  bagWidths.forEach((width, index) => {
+    bags.getColumn(index + 1).width = width;
+  });
+  bags.addRow([
+    `Tea bags · ${report.range.start} → ${report.range.end} · counted separately from loose-leaf grams`,
+  ]).font = { bold: true };
+  const bagHeader = bags.addRow([
+    "SKU",
+    "Gift",
+    "Bags / gift",
+    ...report.channels.map((channel) => `${channel} bags`),
+    "Total tea bags",
+  ]);
+  bagHeader.font = { bold: true };
+  for (const reportRow of report.teaBagRows) {
+    const row = bags.addRow([
+      reportRow.sku,
+      reportRow.gift,
+      reportRow.teaBagsPerUnit,
+      ...report.channels.map((channel) => reportRow.byChannel[channel] ?? 0),
+      reportRow.totalTeaBags,
+    ]);
+    for (let c = 3; c <= row.cellCount; c += 1) {
+      row.getCell(c).numFmt = "#,##0";
+    }
+  }
+  if (report.teaBagRows.length > 0) {
+    const bagTotal = bags.addRow([
+      "",
+      "TOTAL",
+      "",
+      ...report.channels.map((channel) =>
+        report.teaBagRows.reduce(
+          (sum, reportRow) => sum + (reportRow.byChannel[channel] ?? 0),
+          0,
+        ),
+      ),
+      report.totalTeaBags,
+    ]);
+    bagTotal.font = { bold: true };
+    for (let c = 4; c <= bagTotal.cellCount; c += 1) {
+      bagTotal.getCell(c).numFmt = "#,##0";
+    }
+  }
+
+  const detail = workbook.addWorksheet(`${prefix}Gram SKU Detail`.slice(0, 31));
+  const detailWidths = [12, 32, 12, 20, 12, 18, 13, 12, 13, 13];
+  detailWidths.forEach((width, index) => {
+    detail.getColumn(index + 1).width = width;
+  });
+  const detailHeader = detail.addRow([
+    "SKU Family",
+    "Tea",
+    "SKU",
+    "Variant",
+    "Channel",
+    "Conversion",
+    "Grams / unit",
+    "Units sold",
+    "Total g",
+    "Total kg",
+  ]);
+  detailHeader.font = { bold: true };
+  for (const reportRow of report.skuRows) {
+    const row = detail.addRow([
+      reportRow.skuFamily ?? "",
+      reportRow.tea,
+      reportRow.sku,
+      reportRow.variant,
+      reportRow.channel,
+      reportRow.basis,
+      reportRow.gramsPerUnit,
+      reportRow.units,
+      reportRow.totalGrams,
+      reportRow.totalGrams / 1_000,
+    ]);
+    for (const c of [7, 8, 9]) row.getCell(c).numFmt = GRAMS;
+    row.getCell(10).numFmt = KILOGRAMS;
+  }
+
+  const audit = workbook.addWorksheet(`${prefix}Gram Unmapped`.slice(0, 31));
+  const auditWidths = [14, 36, 22, 26, 12, 12, 46];
+  auditWidths.forEach((width, index) => {
+    audit.getColumn(index + 1).width = width;
+  });
+  audit.addRow([
+    "Tea lines and gift components that need conversion or SKU-family review.",
+  ]).font = { bold: true };
+  const auditHeader = audit.addRow([
+    "SKU",
+    "Item",
+    "Variant",
+    "Category",
+    "Channel",
+    "Units",
+    "Reason",
+  ]);
+  auditHeader.font = { bold: true };
+  for (const reportRow of report.unmapped) {
+    const row = audit.addRow([
+      reportRow.sku,
+      reportRow.item,
+      reportRow.variant,
+      reportRow.category,
+      reportRow.channel,
+      reportRow.units,
+      reportRow.reason,
+    ]);
+    row.getCell(6).numFmt = GRAMS;
+  }
+}
+
+export async function buildTeaByGramWorkbook(
+  report: TeaByGramReport,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  writeTeaByGramSheets(workbook, report);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
 function writeTop10Sheets(
   workbook: ExcelJS.Workbook,
   report: Top10Report,
@@ -504,7 +696,14 @@ function writeTop10Sheets(
   ]).font = { bold: true };
   for (const channel of report.channels) {
     summary.addRow([]);
-    const head = summary.addRow([channel.channel, "Category", "TY", "LY", "% to LY", "TY % pen"]);
+    const head = summary.addRow([
+      channel.channel,
+      "Category",
+      "TY",
+      "LY",
+      "% to LY",
+      "TY % pen",
+    ]);
     head.font = { bold: true };
     for (const category of channel.categories) {
       const row = summary.addRow(["", category.category]);
@@ -522,7 +721,9 @@ function writeTop10Sheets(
   }
 
   for (const channel of report.channels) {
-    const sheet = workbook.addWorksheet(`${prefix}Top10 ${channel.channel}`.slice(0, 31));
+    const sheet = workbook.addWorksheet(
+      `${prefix}Top10 ${channel.channel}`.slice(0, 31),
+    );
     sheet.getColumn(2).width = 44;
     sheet.getColumn(3).width = 12;
     sheet.getColumn(4).width = 8;
@@ -562,13 +763,19 @@ export async function buildAllReportsWorkbook(
   productReports: ProductSellingReport[],
   top10: Top10Report,
   units: UnitsBySizeReport,
+  grams: TeaByGramReport,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   writeWeeklySheet(workbook, weekly, "Weekly Report");
   for (const report of productReports) {
-    writeProductCombinedSheet(workbook, report, report.scope.label.slice(0, 31));
+    writeProductCombinedSheet(
+      workbook,
+      report,
+      report.scope.label.slice(0, 31),
+    );
   }
   writeTop10Sheets(workbook, top10, "T10 ");
   writeUnitsSheet(workbook, units, "Units by Size", null);
+  writeTeaByGramSheets(workbook, grams);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
