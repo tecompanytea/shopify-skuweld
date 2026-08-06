@@ -1,10 +1,12 @@
 import prisma from "../../db.server";
 import { squareFetch } from "../square/client";
-import { toReportDay, rangeToInstants, dayInRange, type DayRange } from "../../lib/periods";
 import {
-  resolveIncrementalSince,
-  replaceSourceOrders,
-} from "./incremental";
+  toReportDay,
+  rangeToInstants,
+  dayInRange,
+  type DayRange,
+} from "../../lib/periods";
+import { resolveIncrementalSince, replaceSourceOrders } from "./incremental";
 
 // Pulls Square orders (sales + itemized returns) into the SalesLine fact
 // table. Channel rules from the manual reports: each store location is its
@@ -26,6 +28,14 @@ interface SquareLineItem {
   gross_sales_money?: Money;
   total_discount_money?: Money;
   total_tax_money?: Money;
+  modifiers?: SquareModifier[];
+}
+
+interface SquareModifier {
+  uid?: string;
+  catalog_object_id?: string;
+  name?: string;
+  quantity?: string;
 }
 
 interface SquareReturnLineItem extends SquareLineItem {
@@ -76,6 +86,105 @@ interface SquareContext {
   locationIds: string[];
   invoiceOrderIds: Set<string>;
   catalog: Map<string, CatalogVariationInfo>;
+  teaSkuByName: Map<string, string>;
+}
+
+export interface TastingFlightTeaSelection {
+  uid: string | null;
+  catalogObjectId: string | null;
+  tea: string;
+  sku: string | null;
+  quantity: number;
+}
+
+function modifierTeaKey(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(?:iced\s+)?to\s+(?:go|stay)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const TASTING_MODIFIER_ALIASES = new Map([["mt qilai", "mount qilai"]]);
+
+function catalogTeaSku(
+  name: string,
+  teaSkuByName: ReadonlyMap<string, string>,
+): string | null {
+  const key = modifierTeaKey(name);
+  return (
+    teaSkuByName.get(key) ??
+    teaSkuByName.get(TASTING_MODIFIER_ALIASES.get(key) ?? "") ??
+    null
+  );
+}
+
+// A flight's base SKU describes the service, not the tea consumed. Square
+// stores each chosen tea as a modifier, normally as "Tea name (six-digit SKU)".
+// Older buttons did not include the SKU, so fall back to the current catalog by
+// tea name. Unresolved OPEN buttons are retained with a null SKU for the gram
+// report's audit sheet rather than silently inventing a tea.
+export function tastingFlightTeaSelections(
+  line: Pick<SquareLineItem, "name" | "quantity" | "modifiers">,
+  teaSkuByName: ReadonlyMap<string, string> = new Map(),
+): TastingFlightTeaSelection[] {
+  if (!/\btasting flight\b/i.test(line.name ?? "")) return [];
+
+  const lineQuantity = Number.parseFloat(line.quantity ?? "1");
+  const safeLineQuantity = Number.isFinite(lineQuantity) ? lineQuantity : 1;
+  const selections = (line.modifiers ?? []).map((modifier, index) => {
+    const rawName = modifier.name?.trim() || "(unnamed modifier)";
+    const explicit = rawName.match(/^(.*?)\s*\((\d{6})\)\s*$/);
+    const modifierQuantity = Number.parseFloat(modifier.quantity ?? "1");
+    return {
+      uid: modifier.uid ?? String(index),
+      catalogObjectId: modifier.catalog_object_id ?? null,
+      tea: explicit?.[1]?.trim() || rawName,
+      sku: explicit?.[2] ?? catalogTeaSku(rawName, teaSkuByName),
+      quantity:
+        safeLineQuantity *
+        (Number.isFinite(modifierQuantity) ? modifierQuantity : 1),
+    };
+  });
+
+  const missingQuantity =
+    safeLineQuantity * 3 -
+    selections.reduce((sum, selection) => sum + selection.quantity, 0);
+  if (missingQuantity > 0) {
+    selections.push({
+      uid: "missing",
+      catalogObjectId: null,
+      tea: "(missing tasting flight selection)",
+      sku: null,
+      quantity: missingQuantity,
+    });
+  }
+  return selections;
+}
+
+function preferredTeaSkusByName(
+  catalog: ReadonlyMap<string, CatalogVariationInfo>,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  const rank = (sku: string) => {
+    const suffix = sku.slice(4);
+    if (suffix === "20") return 0;
+    if (suffix === "11") return 1;
+    if (suffix === "10") return 2;
+    return 3;
+  };
+
+  for (const info of catalog.values()) {
+    const sku = info.sku?.trim() ?? "";
+    if (!/^\d{6}$/.test(sku) || !info.itemName) continue;
+    const key = modifierTeaKey(info.itemName);
+    const prior = result.get(key);
+    if (!prior || rank(sku) < rank(prior)) result.set(key, sku);
+  }
+  return result;
 }
 
 // Square's order search takes exactly one date_time_filter field, and the sort
@@ -125,7 +234,10 @@ async function listInvoiceOrderIds(
   for (const locationId of locationIds) {
     let cursor: string | undefined;
     do {
-      const params = new URLSearchParams({ location_id: locationId, limit: "200" });
+      const params = new URLSearchParams({
+        location_id: locationId,
+        limit: "200",
+      });
       if (cursor) params.set("cursor", cursor);
       const data = await squareFetch<{
         invoices?: Array<{ order_id?: string }>;
@@ -225,7 +337,8 @@ async function loadSquareContext(shop: string): Promise<SquareContext> {
   const locationIds = [...channels.keys()];
   const invoiceOrderIds = await listInvoiceOrderIds(shop, locationIds);
   const catalog = await buildCatalogMap(shop);
-  return { channels, locationIds, invoiceOrderIds, catalog };
+  const teaSkuByName = preferredTeaSkusByName(catalog);
+  return { channels, locationIds, invoiceOrderIds, catalog, teaSkuByName };
 }
 
 interface SquareCollectResult {
@@ -329,6 +442,32 @@ async function collectSquareRows(
           netCents: sign * (gross - discount),
           taxCents: sign * tax,
         });
+
+        for (const selection of kind === "sale"
+          ? tastingFlightTeaSelections(line, ctx.teaSkuByName)
+          : []) {
+          rows.push({
+            id: `sq:${order.id}:usage:flight:${line.uid ?? index}:${selection.uid}`,
+            shop,
+            source: "square",
+            channel,
+            kind: "usage",
+            orderId: order.id,
+            occurredAt,
+            day,
+            sku: selection.sku,
+            itemName: selection.tea,
+            variationName: line.name ?? "Tasting Flight",
+            productKey: null,
+            productTitle: selection.tea,
+            category: "Tasting Flight Tea",
+            quantity: selection.quantity,
+            grossCents: 0,
+            discountCents: 0,
+            netCents: 0,
+            taxCents: 0,
+          });
+        }
       };
 
       (order.line_items ?? []).forEach((line, i) => pushLine(line, "sale", i));
@@ -372,7 +511,11 @@ export async function syncSquareOrders(
     const { rows, seenOrderIds } = await collectSquareRows(
       shop,
       ctx,
-      { field: "closed_at", startAt: startAt.toISOString(), endAt: endAt.toISOString() },
+      {
+        field: "closed_at",
+        startAt: startAt.toISOString(),
+        endAt: endAt.toISOString(),
+      },
       range,
       (orders, lines) =>
         setState("running", `${orders} orders, ${lines} lines so far`),

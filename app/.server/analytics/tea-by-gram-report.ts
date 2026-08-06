@@ -15,6 +15,8 @@ export type GramBasis =
   | "TO GO"
   | "TO STAY"
   | "ICED TO STAY"
+  | "TASTING FLIGHT"
+  | "OOLONG PALMER"
   | "GIFT";
 
 export interface GramConversion {
@@ -26,6 +28,7 @@ interface ConvertibleLine {
   category: string | null;
   itemName: string;
   variationName: string | null;
+  productTitle?: string | null;
   sku: string | null;
 }
 
@@ -44,11 +47,32 @@ function compact(value: string | null | undefined): string {
     .trim();
 }
 
+function productText(line: ConvertibleLine): string {
+  return compact(`${line.productTitle ?? ""} ${line.itemName}`);
+}
+
+function isExcludedGramLine(line: ConvertibleLine): boolean {
+  const product = productText(line);
+  return (
+    /\bsharing pot\b/.test(product) ||
+    /\bshopping bags?\b/.test(product) ||
+    /\btasting flight\b/.test(product)
+  );
+}
+
+function isOolongPalmerLine(line: ConvertibleLine): boolean {
+  return /\boolong palmer\b/.test(productText(line));
+}
+
 // Category is authoritative for prepared tea because its six-digit SKU suffix
 // identifies the service variant, not an ounce size. Variant text handles
 // historical/category-drift rows and distinguishes iced TO STAY.
 export function gramConversionOf(line: ConvertibleLine): GramConversion | null {
   const category = compact(line.category);
+  if (isExcludedGramLine(line)) return null;
+  if (category === "tasting flight tea") {
+    return { grams: 4, basis: "TASTING FLIGHT" };
+  }
   const text = compact(`${line.variationName ?? ""} ${line.itemName}`);
   const isToGo = category === "service to go" || /\bto go\b/.test(text);
   const isToStay = category === "service to stay" || /\bto stay\b/.test(text);
@@ -359,13 +383,18 @@ export async function computeTeaByGramReport(
       where: {
         shop,
         day: { gte: range.start, lte: range.end },
-        kind: "sale",
+        kind: { in: ["sale", "usage"] },
         quantity: { gt: 0 },
         OR: [
           {
             source: "square",
             category: {
-              in: ["Retail Loose Leaf Tea", "Service To Go", "Service To Stay"],
+              in: [
+                "Retail Loose Leaf Tea",
+                "Service To Go",
+                "Service To Stay",
+                "Tasting Flight Tea",
+              ],
             },
           },
           { source: "shopify", category: "Loose Leaf" },
@@ -557,14 +586,57 @@ export async function computeTeaByGramReport(
       continue;
     }
 
-    const family = skuFamily(sku);
-    if (!family) {
-      addUnmapped(line, "Missing or non-standard six-digit tea SKU");
-      continue;
-    }
+    if (isExcludedGramLine(line)) continue;
+
     const conversion = gramConversionOf(line);
     if (!conversion) {
       addUnmapped(line, "Variant has no gram conversion");
+      continue;
+    }
+
+    if (isOolongPalmerLine(line)) {
+      const rubyBrewName = "Ruby Brew";
+      const family =
+        familyByTeaName.get(normalizedTeaName(rubyBrewName)) ?? null;
+      const aggregationKey = family
+        ? `family:${family}`
+        : "recipe:oolong-palmer";
+      const gramsPerUnit = conversion.grams / 2;
+      const grams = line.quantity * gramsPerUnit;
+      addTea(
+        aggregationKey,
+        family,
+        rubyBrewName,
+        line.channel,
+        grams,
+        line.quantity,
+      );
+      addDetail(
+        aggregationKey,
+        {
+          skuFamily: family,
+          tea: rubyBrewName,
+          sku,
+          variant: line.variationName ?? "",
+          channel: line.channel,
+          basis: "OOLONG PALMER",
+          gramsPerUnit,
+        },
+        line.quantity,
+        grams,
+      );
+      if (!family) {
+        addUnmapped(
+          line,
+          "Oolong Palmer could not be matched to the Ruby Brew SKU family",
+        );
+      }
+      continue;
+    }
+
+    const family = skuFamily(sku);
+    if (!family) {
+      addUnmapped(line, "Missing or non-standard six-digit tea SKU");
       continue;
     }
 

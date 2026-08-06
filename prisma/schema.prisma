@@ -82,7 +82,7 @@ model SalesLine {
   shop          String
   source        String // shopify | square
   channel       String // WV | EV | ECOM | INVOICED
-  kind          String // sale | return
+  kind          String // sale | return | usage (non-financial tea selections)
   orderId       String
   occurredAt    DateTime
   day           String // YYYY-MM-DD, America/New_York

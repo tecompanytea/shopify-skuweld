@@ -212,6 +212,7 @@ export async function computeAnalyticsChartSummary(
   const rows = await prisma.salesLine.findMany({
     where: {
       shop,
+      kind: { in: ["sale", "return"] },
       OR: [
         { day: { gte: range.start, lte: range.end } },
         { day: { gte: lyRange.start, lte: lyRange.end } },

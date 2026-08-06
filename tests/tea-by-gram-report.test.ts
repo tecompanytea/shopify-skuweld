@@ -96,6 +96,50 @@ describe("gramConversionOf", () => {
       ),
     ).toEqual({ grams: 4, basis: "ICED TO STAY" });
   });
+
+  it("excludes service buttons that are not teas and converts flight selections", () => {
+    expect(
+      gramConversionOf(
+        line({
+          category: "Service To Stay",
+          itemName: "Sharing Pot",
+          productTitle: "Sharing Pot",
+          sku: "170410",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      gramConversionOf(
+        line({
+          category: "Service To Go",
+          itemName: "Shopping Bag",
+          productTitle: "Shopping Bag",
+          sku: "999999",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      gramConversionOf(
+        line({
+          category: "Service To Stay",
+          itemName: "Tasting Flight",
+          productTitle: "Tasting Flight",
+          sku: "170110",
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      gramConversionOf(
+        line({
+          category: "Tasting Flight Tea",
+          itemName: "Oriental Beauty",
+          productTitle: "Oriental Beauty",
+          variationName: "Tasting Flight",
+          sku: "105620",
+        }),
+      ),
+    ).toEqual({ grams: 4, basis: "TASTING FLIGHT" });
+  });
 });
 
 describe("gift recipes", () => {
@@ -267,12 +311,12 @@ describe("computeTeaByGramReport", () => {
     ]);
   });
 
-  it("requests positive sale rows only, so refunds do not subtract usage", async () => {
+  it("requests positive sale and usage rows only, so refunds do not subtract usage", async () => {
     await computeTeaByGramReport("tea.myshopify.com", RANGE);
     expect(salesFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: "sale",
+          kind: { in: ["sale", "usage"] },
           quantity: { gt: 0 },
         }),
       }),
@@ -307,6 +351,89 @@ describe("computeTeaByGramReport", () => {
       ].sort(),
     );
     expect(report.totalGrams).toBe(80);
+    expect(report.unmapped).toEqual([]);
+  });
+
+  it("removes non-tea service buttons, assigns flights, and halves Oolong Palmer into Ruby Brew", async () => {
+    skuFindMany.mockResolvedValue([
+      { value: "105501", productName: "Ruby Brew" },
+      { value: "105601", productName: "Oriental Beauty" },
+    ]);
+    salesFindMany.mockResolvedValue([
+      line({
+        category: "Service To Stay",
+        itemName: "Sharing Pot",
+        productTitle: "Sharing Pot",
+        variationName: "Regular",
+        sku: "170410",
+        quantity: 10,
+      }),
+      line({
+        category: "Service To Go",
+        itemName: "Shopping Bag",
+        productTitle: "Shopping Bag",
+        variationName: "Regular",
+        sku: "999999",
+        quantity: 10,
+      }),
+      line({
+        category: "Service To Stay",
+        itemName: "Tasting Flight",
+        productTitle: "Tasting Flight",
+        variationName: "Regular",
+        sku: "170110",
+        quantity: 10,
+      }),
+      line({
+        category: "Tasting Flight Tea",
+        itemName: "Oriental Beauty",
+        productTitle: "Oriental Beauty",
+        variationName: "Tasting Flight",
+        sku: "105620",
+        quantity: 2,
+      }),
+      line({
+        category: "Service To Stay",
+        itemName: "Oolong Palmer TO STAY",
+        productTitle: "Oolong Palmer TO STAY",
+        variationName: "Regular",
+        sku: "155511",
+        quantity: 2,
+      }),
+      line({
+        category: "Service To Go",
+        itemName: "Oolong Palmer TO GO",
+        productTitle: "Oolong Palmer TO GO",
+        variationName: "Regular",
+        sku: "155521",
+        quantity: 3,
+      }),
+    ]);
+
+    const report = await computeTeaByGramReport("tea.myshopify.com", RANGE);
+
+    expect(report.rows).toEqual([
+      expect.objectContaining({
+        skuFamily: "1055",
+        name: "Ruby Brew",
+        totalGrams: 12,
+      }),
+      expect.objectContaining({
+        skuFamily: "1056",
+        name: "Oriental Beauty",
+        totalGrams: 8,
+      }),
+    ]);
+    expect(report.rows.some((row) => row.skuFamily === "1701")).toBe(false);
+    expect(report.rows.some((row) => row.skuFamily === "1704")).toBe(false);
+    expect(report.rows.some((row) => row.skuFamily === "9999")).toBe(false);
+    expect(
+      report.skuRows.filter((row) => row.basis === "OOLONG PALMER"),
+    ).toEqual([
+      expect.objectContaining({ gramsPerUnit: 3, units: 2, totalGrams: 6 }),
+      expect.objectContaining({ gramsPerUnit: 2, units: 3, totalGrams: 6 }),
+    ]);
+    expect(report.totalGrams).toBe(20);
     expect(report.unmapped).toEqual([]);
   });
 });

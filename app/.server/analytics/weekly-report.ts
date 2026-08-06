@@ -80,7 +80,11 @@ interface Sums {
 async function sumRange(shop: string, range: DayRange): Promise<Sums> {
   const grouped = await prisma.salesLine.groupBy({
     by: ["channel", "category"],
-    where: { shop, day: { gte: range.start, lte: range.end } },
+    where: {
+      shop,
+      kind: { in: ["sale", "return"] },
+      day: { gte: range.start, lte: range.end },
+    },
     _sum: { netCents: true },
   });
   const byChannelCategory = new Map<string, Map<string, number>>();

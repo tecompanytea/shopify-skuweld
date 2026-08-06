@@ -87,6 +87,7 @@ export async function computeTop10Report(
     prisma.salesLine.findMany({
       where: {
         shop,
+        kind: { in: ["sale", "return"] },
         day: { gte: window.start, lte: window.end },
         channel: { in: ["WV", "EV", "ECOM"] },
       },
