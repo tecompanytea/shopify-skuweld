@@ -66,6 +66,29 @@ describe("gramConversionOf", () => {
     ).toBeNull();
   });
 
+  it("uses the Hibiscus 20g and 60g package overrides", () => {
+    expect(
+      gramConversionOf(
+        line({
+          itemName: "Hibiscus 20g",
+          productTitle: "Hibiscus 20g",
+          variationName: "Regular",
+          sku: "110601",
+        }),
+      ),
+    ).toEqual({ grams: 20, basis: "20 g" });
+    expect(
+      gramConversionOf(
+        line({
+          itemName: "Hibiscus",
+          productTitle: "Hibiscus",
+          variationName: "60 grams",
+          sku: "110606",
+        }),
+      ),
+    ).toEqual({ grams: 60, basis: "60 g" });
+  });
+
   it("maps TO GO, hot TO STAY, and iced TO STAY before looking at SKU suffixes", () => {
     expect(
       gramConversionOf(
@@ -92,6 +115,17 @@ describe("gramConversionOf", () => {
           category: "Service To Stay",
           variationName: "Iced TO STAY",
           sku: "100510",
+        }),
+      ),
+    ).toEqual({ grams: 4, basis: "ICED TO STAY" });
+    expect(
+      gramConversionOf(
+        line({
+          category: "Service To Stay",
+          itemName: "Hibiscus Soda TO STAY",
+          productTitle: "Hibiscus Soda TO STAY",
+          variationName: "Regular",
+          sku: "110611",
         }),
       ),
     ).toEqual({ grams: 4, basis: "ICED TO STAY" });
@@ -186,6 +220,14 @@ describe("gift recipes", () => {
         (component) => component.tea === "Baozhong Vintage",
       ),
     ).toMatchObject({ grams: 10 });
+  });
+
+  it("keeps all six Iconic set teas at 10 grams each", () => {
+    const recipe = giftGramRecipe("400101");
+    expect(recipe?.components).toHaveLength(6);
+    expect(
+      recipe?.components.every((component) => component.grams === 10),
+    ).toBe(true);
   });
 });
 
@@ -446,6 +488,83 @@ describe("computeTeaByGramReport", () => {
     ]);
     expect(report.totalGrams).toBe(20);
     expect(report.unmapped).toEqual([]);
+  });
+
+  it("maps Valley gifts, Hibiscus gram packs, and Wuyi shared SKUs to their canonical families", async () => {
+    skuFindMany.mockResolvedValue([
+      { value: "107101", productName: "Baozhong Expert's Pick" },
+      { value: "105201", productName: "Valley of DP" },
+      { value: "105601", productName: "Oriental Beauty" },
+      { value: "106601", productName: "Frozen Summit" },
+      { value: "107901", productName: "Jade Rouge" },
+      { value: "100501", productName: "Iron Goddess" },
+    ]);
+    salesFindMany.mockResolvedValue([
+      line({
+        itemName: "Valley of DP",
+        productTitle: "Valley of DP",
+        sku: "105201",
+      }),
+      line({
+        category: "Retail Gifts",
+        itemName: "Iconic Gift",
+        productTitle: "Iconic Gift",
+        variationName: "Regular",
+        sku: "400101",
+      }),
+      line({
+        itemName: "Hibiscus 20g",
+        productTitle: "Hibiscus 20g",
+        variationName: "Regular",
+        sku: "110601",
+      }),
+      line({
+        itemName: "Hibiscus 60g",
+        productTitle: "Hibiscus 60g",
+        variationName: "Regular",
+        sku: "110606",
+        quantity: 2,
+      }),
+      line({
+        category: "Service To Stay",
+        itemName: "Hibiscus Soda TO STAY",
+        productTitle: "Hibiscus Soda TO STAY",
+        variationName: "Regular",
+        sku: "110611",
+        quantity: 3,
+      }),
+      line({
+        itemName: "Wuyi Roast",
+        productTitle: "Wuyi Roast",
+        sku: "102401",
+      }),
+      line({
+        category: "Tasting Flight Tea",
+        itemName: "Wuyi Roast",
+        productTitle: "Wuyi Roast",
+        variationName: "Tasting Flight",
+        sku: "150124",
+        quantity: 2,
+      }),
+    ]);
+
+    const report = await computeTeaByGramReport("tea.myshopify.com", RANGE);
+
+    expect(report.rows.find((row) => row.skuFamily === "1052")).toMatchObject({
+      totalGrams: 40,
+    });
+    expect(report.rows.find((row) => row.skuFamily === "1106")).toMatchObject({
+      totalGrams: 152,
+    });
+    expect(report.rows.find((row) => row.skuFamily === "1024")).toMatchObject({
+      name: "Wuyi Roast",
+      totalGrams: 38,
+    });
+    expect(report.rows.some((row) => row.skuFamily === "1501")).toBe(false);
+    expect(report.unmapped.some((row) => /valley/i.test(row.variant))).toBe(
+      false,
+    );
+    expect(report.totalGrams).toBe(280);
   });
 });
 

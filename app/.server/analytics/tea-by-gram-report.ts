@@ -12,6 +12,8 @@ export type GramBasis =
   | "4 oz"
   | "8 oz"
   | "10 g"
+  | "20 g"
+  | "60 g"
   | "TO GO"
   | "TO STAY"
   | "ICED TO STAY"
@@ -37,6 +39,24 @@ const OZ_GRAMS: Record<string, GramConversion> = {
   "02": { grams: 60, basis: "2 oz" },
   "04": { grams: 120, basis: "4 oz" },
   "08": { grams: 240, basis: "8 oz" },
+};
+
+const SKU_GRAM_OVERRIDES: Record<string, GramConversion> = {
+  // Hibiscus retail uses gram-specific suffixes rather than the usual ounce
+  // suffix scheme: 01 is the 20g package and 06 is the 60g package.
+  "110601": { grams: 20, basis: "20 g" },
+  "110606": { grams: 60, basis: "60 g" },
+};
+
+interface CanonicalTeaOverride {
+  tea: string;
+  skuFamily: string;
+}
+
+const CANONICAL_TEA_OVERRIDES: Record<string, CanonicalTeaOverride> = {
+  // These shared iced-service SKUs belong to Wuyi Roast, not family 1501.
+  "150115": { tea: "Wuyi Roast", skuFamily: "1024" },
+  "150124": { tea: "Wuyi Roast", skuFamily: "1024" },
 };
 
 function compact(value: string | null | undefined): string {
@@ -80,10 +100,14 @@ export function gramConversionOf(line: ConvertibleLine): GramConversion | null {
 
   if (isToGo) return { grams: 4, basis: "TO GO" };
   if (isToStay) {
-    return /\biced?\b/.test(text)
+    return /\biced?\b/.test(text) || /\bhibiscus soda\b/.test(text)
       ? { grams: 4, basis: "ICED TO STAY" }
       : { grams: 6, basis: "TO STAY" };
   }
+
+  const sku = line.sku?.trim() ?? "";
+  const skuOverride = SKU_GRAM_OVERRIDES[sku];
+  if (skuOverride) return skuOverride;
 
   const variant = compact(line.variationName);
   if (/\b10\s*g(?:rams?)?\b/.test(variant)) {
@@ -98,7 +122,6 @@ export function gramConversionOf(line: ConvertibleLine): GramConversion | null {
     if (new RegExp(`\\b${ounces}\\s*oz\\b`).test(variant)) return conversion;
   }
 
-  const sku = line.sku?.trim() ?? "";
   if (/^\d{6}$/.test(sku)) return OZ_GRAMS[sku.slice(4)] ?? null;
   return null;
 }
@@ -106,13 +129,18 @@ export function gramConversionOf(line: ConvertibleLine): GramConversion | null {
 interface GiftTeaDefinition {
   tea: string;
   aliases?: string[];
+  skuFamily?: string;
   // Seasonal teas intentionally report as named rows, without a SKU family.
   reportByName?: boolean;
 }
 
 const GIFT_TEAS = {
   "baozhong-experts-pick": { tea: "Baozhong Expert's Pick" },
-  "valley-dragon-phoenix": { tea: "Valley of Dragon & Phoenix" },
+  "valley-dragon-phoenix": {
+    tea: "Valley of Dragon & Phoenix",
+    aliases: ["Valley of DP"],
+    skuFamily: "1052",
+  },
   "oriental-beauty": { tea: "Oriental Beauty" },
   "frozen-summit": { tea: "Frozen Summit" },
   "jade-rouge": { tea: "Jade Rouge" },
@@ -520,6 +548,7 @@ export async function computeTeaByGramReport(
   const componentFamily = (teaKey: GiftTeaKey): string | null => {
     const definition: GiftTeaDefinition = GIFT_TEAS[teaKey];
     if (definition.reportByName) return null;
+    if (definition.skuFamily) return definition.skuFamily;
     for (const candidate of [definition.tea, ...(definition.aliases ?? [])]) {
       const family = familyByTeaName.get(normalizedTeaName(candidate));
       if (family) return family;
@@ -635,7 +664,8 @@ export async function computeTeaByGramReport(
       continue;
     }
 
-    const family = skuFamily(sku);
+    const canonicalOverride = CANONICAL_TEA_OVERRIDES[sku];
+    const family = canonicalOverride?.skuFamily ?? skuFamily(sku);
     if (!family) {
       addUnmapped(line, "Missing or non-standard six-digit tea SKU");
       continue;
@@ -643,7 +673,7 @@ export async function computeTeaByGramReport(
 
     const aggregationKey = `family:${family}`;
     const grams = line.quantity * conversion.grams;
-    const name = teaName(line) || family;
+    const name = canonicalOverride?.tea ?? (teaName(line) || family);
     // Prefer the retail loose-leaf catalog title as the family's display name;
     // service buttons and gift components fold into the same family.
     const retailWeight = /loose leaf/i.test(line.category ?? "")
