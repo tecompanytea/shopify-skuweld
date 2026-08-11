@@ -8,6 +8,7 @@ import type {
 import { SIZE_COLUMNS, type UnitsBySizeReport } from "./units-by-size-report";
 import type { Top10Report } from "./top10-report";
 import type { TeaByGramReport } from "./tea-by-gram-report";
+import type { SnacksByUnitReport } from "./snacks-by-unit-report";
 
 // Renders reports as .xlsx workbooks shaped like the manual templates.
 // Data fidelity is the contract; styling is intentionally minimal.
@@ -141,7 +142,11 @@ function writeWeeklySheet(
     ["E-Commerce", grand.ecom, grand.avg6.ecom],
     ["Invoiced", invoiced, invoicedAvg6],
     ["TOTAL w.o. Inv", grand.total, grand.avg6.total],
-    ["TOTAL w.o. Ecomm", totals.woEcom, grand.avg6.wv + grand.avg6.ev + invoicedAvg6],
+    [
+      "TOTAL w.o. Ecomm",
+      totals.woEcom,
+      grand.avg6.wv + grand.avg6.ev + invoicedAvg6,
+    ],
     ["TOTAL", totals.all, grand.avg6.total + invoicedAvg6],
   ];
   for (const [label, pair, avg6] of channelRows) {
@@ -529,6 +534,65 @@ export async function buildUnitsBySizeWorkbook(
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
+function writeSnacksByUnitSheet(
+  workbook: ExcelJS.Workbook,
+  report: SnacksByUnitReport,
+  title = "Snacks by Unit",
+): void {
+  const sheet = workbook.addWorksheet(title.slice(0, 31));
+  sheet.getColumn(1).width = 42;
+  sheet.getColumn(2).width = 24;
+  for (let column = 3; column <= report.channels.length + 3; column += 1) {
+    sheet.getColumn(column).width = 14;
+  }
+  sheet.addRow([
+    `Snacks — Kitchen Units · ${report.range.start} → ${report.range.end} · packs and gifts converted; returns subtract`,
+  ]).font = { bold: true, size: 13 };
+  const header = sheet.addRow([
+    "Snack",
+    "Category",
+    ...report.channels,
+    "Total Units",
+  ]);
+  header.font = { bold: true };
+  for (const reportRow of report.rows) {
+    sheet.addRow([
+      reportRow.name,
+      reportRow.category,
+      ...report.channels.map((channel) => reportRow.byChannel[channel]),
+      reportRow.totalUnits,
+    ]);
+  }
+  const total = sheet.addRow([
+    "TOTAL",
+    "",
+    ...report.channels.map((channel) => report.totalsByChannel[channel]),
+    report.totalUnits,
+  ]);
+  total.font = { bold: true };
+
+  if (report.unmapped.length > 0) {
+    sheet.addRow([]);
+    sheet.addRow(["Unmapped snack SKUs — excluded from totals"]).font = {
+      bold: true,
+    };
+    sheet.addRow(["SKU", "Snack", "Channel", "Sold Quantity"]).font = {
+      bold: true,
+    };
+    for (const row of report.unmapped) {
+      sheet.addRow([row.sku ?? "", row.name, row.channel, row.quantity]);
+    }
+  }
+}
+
+export async function buildSnacksByUnitWorkbook(
+  report: SnacksByUnitReport,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  writeSnacksByUnitSheet(workbook, report);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
 function writeTeaByGramSheets(
   workbook: ExcelJS.Workbook,
   report: TeaByGramReport,
@@ -774,14 +838,15 @@ export async function buildTop10Workbook(report: Top10Report): Promise<Buffer> {
 }
 
 // One workbook with everything for the chosen period: the weekly meeting
-// report, a combined product-selling sheet per category, the Top10
-// category summary, and the units-by-size totals.
+// report, a combined product-selling sheet per category, the Top10 category
+// summary, units-by-size totals, tea usage, and converted snack kitchen units.
 export async function buildAllReportsWorkbook(
   weekly: WeeklyReport,
   productReports: ProductSellingReport[],
   top10: Top10Report,
   units: UnitsBySizeReport,
   grams: TeaByGramReport,
+  snacks: SnacksByUnitReport,
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   writeWeeklySheet(workbook, weekly, "Weekly Report");
@@ -795,5 +860,6 @@ export async function buildAllReportsWorkbook(
   writeTop10Sheets(workbook, top10, "T10 ");
   writeUnitsSheet(workbook, units, "Units by Size", null);
   writeTeaByGramSheets(workbook, grams);
+  writeSnacksByUnitSheet(workbook, snacks);
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }

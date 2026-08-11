@@ -97,6 +97,44 @@ export interface TastingFlightTeaSelection {
   quantity: number;
 }
 
+export interface SnackFlightSelection {
+  uid: string | null;
+  sku: string | null;
+  snack: string;
+  quantity: number;
+}
+
+// Snack Flight choices are kitchen demand, while the parent is only the menu
+// bundle. Persist each chosen modifier as a zero-dollar usage fact so reports
+// can expand it using the same SKU conversions as the Stores PAR workflow.
+export function snackFlightSelections(
+  line: Pick<SquareLineItem, "name" | "quantity" | "modifiers">,
+  catalog: ReadonlyMap<string, Pick<CatalogVariationInfo, "sku">> = new Map(),
+  parentSku: string | null = null,
+): SnackFlightSelection[] {
+  if (parentSku !== "270210" && !/\bsnack flight\b/i.test(line.name ?? "")) {
+    return [];
+  }
+  const lineQuantity = Number.parseFloat(line.quantity ?? "1");
+  const safeLineQuantity = Number.isFinite(lineQuantity) ? lineQuantity : 1;
+  return (line.modifiers ?? []).map((modifier, index) => {
+    const rawName = modifier.name?.trim() || "(unnamed modifier)";
+    const explicitSku = rawName.match(/\b(2\d{5,})\b/)?.[1] ?? null;
+    const modifierQuantity = Number.parseFloat(modifier.quantity ?? "1");
+    return {
+      uid: modifier.uid ?? String(index),
+      sku:
+        (modifier.catalog_object_id
+          ? catalog.get(modifier.catalog_object_id)?.sku
+          : null) ?? explicitSku,
+      snack: rawName.replace(/\s*\(2\d{5,}\)\s*$/, "").trim(),
+      quantity:
+        safeLineQuantity *
+        (Number.isFinite(modifierQuantity) ? modifierQuantity : 1),
+    };
+  });
+}
+
 function modifierTeaKey(value: string): string {
   return value
     .normalize("NFKD")
@@ -462,6 +500,34 @@ async function collectSquareRows(
             productTitle: selection.tea,
             category: "Tasting Flight Tea",
             quantity: selection.quantity,
+            grossCents: 0,
+            discountCents: 0,
+            netCents: 0,
+            taxCents: 0,
+          });
+        }
+
+        for (const selection of snackFlightSelections(
+          line,
+          ctx.catalog,
+          info?.sku ?? null,
+        )) {
+          rows.push({
+            id: `sq:${order.id}:usage:snack:${kind}:${line.uid ?? index}:${selection.uid}`,
+            shop,
+            source: "square",
+            channel,
+            kind: "usage",
+            orderId: order.id,
+            occurredAt,
+            day,
+            sku: selection.sku,
+            itemName: selection.snack,
+            variationName: line.name ?? "Snack Flight",
+            productKey: null,
+            productTitle: selection.snack,
+            category: "Snack Flight Component",
+            quantity: sign * selection.quantity,
             grossCents: 0,
             discountCents: 0,
             netCents: 0,

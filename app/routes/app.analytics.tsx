@@ -66,6 +66,10 @@ import {
   computeTeaByGramReport,
   type TeaByGramReport,
 } from "../.server/analytics/tea-by-gram-report";
+import {
+  computeSnacksByUnitReport,
+  type SnacksByUnitReport,
+} from "../.server/analytics/snacks-by-unit-report";
 import { SIZE_COLUMNS, PRODUCT_REPORT_SCOPES } from "../lib/analytics-scopes";
 import { formatDay, toReportDay } from "../lib/periods";
 import { PeriodPicker } from "../components/period-picker";
@@ -177,6 +181,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let top10: Top10Report | null = null;
   let unitsBySize: UnitsBySizeReport | null = null;
   let teaByGram: TeaByGramReport | null = null;
+  let snacksByUnit: SnacksByUnitReport | null = null;
   if (lineCount > 0) {
     if (type === "weekly") {
       [charts, weekly] = await Promise.all([
@@ -205,6 +210,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ]);
     } else if (type === "tea-by-gram") {
       teaByGram = await computeTeaByGramReport(shop, range);
+    } else if (type === "snacks-by-unit") {
+      snacksByUnit = await computeSnacksByUnitReport(shop, range);
     }
   }
 
@@ -225,6 +232,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     top10,
     unitsBySize,
     teaByGram,
+    snacksByUnit,
   };
 };
 
@@ -1123,6 +1131,92 @@ function UnitsBySizeBlock({ report }: { report: UnitsBySizeReport }) {
   );
 }
 
+function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
+  return (
+    <s-stack direction="block" gap="base">
+      <s-box padding="base">
+        <s-paragraph>
+          Kitchen units after pack and gift-set conversions; returns subtract.
+          Snack Flight choices count instead of the parent bundle.
+        </s-paragraph>
+      </s-box>
+      <s-table>
+        <s-table-header-row>
+          <s-table-header listSlot="primary">Snack</s-table-header>
+          <s-table-header listSlot="kicker">Category</s-table-header>
+          {report.channels.map((channel) => (
+            <s-table-header key={channel} listSlot="labeled" format="numeric">
+              {channel}
+            </s-table-header>
+          ))}
+          <s-table-header listSlot="secondary" format="numeric">
+            Total units
+          </s-table-header>
+        </s-table-header-row>
+        <s-table-body>
+          {report.rows.map((row) => (
+            <s-table-row key={row.key}>
+              <s-table-cell>{row.name}</s-table-cell>
+              <s-table-cell>{row.category}</s-table-cell>
+              {report.channels.map((channel) => (
+                <s-table-cell key={channel}>
+                  {row.byChannel[channel] || ""}
+                </s-table-cell>
+              ))}
+              <s-table-cell>{row.totalUnits}</s-table-cell>
+            </s-table-row>
+          ))}
+          {report.rows.length > 0 && (
+            <s-table-row>
+              <s-table-cell>TOTAL</s-table-cell>
+              <s-table-cell></s-table-cell>
+              {report.channels.map((channel) => (
+                <s-table-cell key={channel}>
+                  {report.totalsByChannel[channel]}
+                </s-table-cell>
+              ))}
+              <s-table-cell>{report.totalUnits}</s-table-cell>
+            </s-table-row>
+          )}
+        </s-table-body>
+      </s-table>
+      {report.unmapped.length > 0 && (
+        <s-stack direction="block" gap="base">
+          <s-box padding="base">
+            <s-heading>Unmapped snack SKUs</s-heading>
+            <s-paragraph>
+              These sales need a kitchen-unit conversion before they can enter
+              the totals.
+            </s-paragraph>
+          </s-box>
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="kicker">SKU</s-table-header>
+              <s-table-header listSlot="primary">Snack</s-table-header>
+              <s-table-header listSlot="labeled">Channel</s-table-header>
+              <s-table-header listSlot="secondary" format="numeric">
+                Sold quantity
+              </s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {report.unmapped.map((row) => (
+                <s-table-row
+                  key={`${row.sku ?? ""}|${row.name}|${row.channel}`}
+                >
+                  <s-table-cell>{row.sku ?? "—"}</s-table-cell>
+                  <s-table-cell>{row.name}</s-table-cell>
+                  <s-table-cell>{row.channel}</s-table-cell>
+                  <s-table-cell>{row.quantity}</s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-stack>
+      )}
+    </s-stack>
+  );
+}
+
 function numberLabel(value: number, maximumFractionDigits = 2): string {
   return value.toLocaleString("en-US", { maximumFractionDigits });
 }
@@ -1391,6 +1485,7 @@ export default function Analytics() {
     top10,
     unitsBySize,
     teaByGram,
+    snacksByUnit,
   } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<typeof action>();
@@ -1488,9 +1583,11 @@ export default function Analytics() {
           ? "Loose Leaf — Units by size"
           : type === "tea-by-gram"
             ? "Tea usage — by gram"
-            : productSelling
-              ? `Product selling — ${productSelling.scope.label}`
-              : "Report";
+            : type === "snacks-by-unit"
+              ? "Snacks — Units sold"
+              : productSelling
+                ? `Product selling — ${productSelling.scope.label}`
+                : "Report";
   const freshnessText =
     lastSyncedLabel === null
       ? lineCount === 0
@@ -1571,15 +1668,17 @@ export default function Analytics() {
               setSearchParams(params);
             }}
           />
-          {type !== "units-by-size" && type !== "tea-by-gram" && (
-            <ComparisonPicker
-              compare={compare}
-              range={range}
-              onSelect={(mode) =>
-                setSearchParams({ ...currentParams(), compare: mode })
-              }
-            />
-          )}
+          {type !== "units-by-size" &&
+            type !== "tea-by-gram" &&
+            type !== "snacks-by-unit" && (
+              <ComparisonPicker
+                compare={compare}
+                range={range}
+                onSelect={(mode) =>
+                  setSearchParams({ ...currentParams(), compare: mode })
+                }
+              />
+            )}
           <s-button
             icon="refresh"
             disabled={Boolean(override) || busy || !stale}
@@ -1616,6 +1715,7 @@ export default function Analytics() {
                 Loose Leaf — Units by size
               </s-option>
               <s-option value="tea-by-gram">Tea usage — by gram</s-option>
+              <s-option value="snacks-by-unit">Snacks — Units sold</s-option>
             </s-select>
           </s-stack>
           {stale ? (
@@ -1717,6 +1817,8 @@ export default function Analytics() {
             <UnitsBySizeBlock report={unitsBySize} />
           ) : teaByGram ? (
             <TeaByGramBlock report={teaByGram} />
+          ) : snacksByUnit ? (
+            <SnacksByUnitBlock report={snacksByUnit} />
           ) : (
             <s-box padding="base">
               <s-paragraph>No sales recorded for this selection.</s-paragraph>

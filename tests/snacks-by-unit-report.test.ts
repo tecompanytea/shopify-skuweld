@@ -1,0 +1,125 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { findMany } = vi.hoisted(() => ({ findMany: vi.fn() }));
+vi.mock("../app/db.server", () => ({
+  default: { salesLine: { findMany } },
+}));
+
+import { computeSnacksByUnitReport } from "../app/.server/analytics/snacks-by-unit-report";
+
+type Line = {
+  channel: string;
+  kind: string;
+  sku: string | null;
+  itemName: string;
+  quantity: number;
+  category: string | null;
+};
+
+const RANGE = { start: "2026-07-01", end: "2026-07-31" };
+
+const line = (over: Partial<Line>): Line => ({
+  channel: "WV",
+  kind: "sale",
+  sku: "203020",
+  itemName: "Pineapple Cake",
+  quantity: 1,
+  category: "Retail Snacks",
+  ...over,
+});
+
+const LINES: Line[] = [
+  line({ quantity: 3 }),
+  // A boxed SKU expands into individual kitchen units.
+  line({
+    channel: "EV",
+    sku: "203002",
+    itemName: "Pineapple Cake Box",
+    quantity: 2,
+  }),
+  // Returns subtract the same converted units.
+  line({
+    channel: "EV",
+    kind: "return",
+    sku: "203002",
+    itemName: "Pineapple Cake Box",
+    quantity: -1,
+  }),
+  // Bundles split into each component.
+  line({
+    channel: "ECOM",
+    sku: "210421",
+    itemName: "Button Trio",
+    quantity: 2,
+  }),
+  // The flight parent is skipped; selected modifiers are stored as usage rows.
+  line({ sku: "270210", itemName: "Snack Flight", quantity: 1 }),
+  line({
+    kind: "usage",
+    sku: "200120",
+    itemName: "Pineapple Linzer",
+    quantity: 2,
+    category: "Snack Flight Component",
+  }),
+  // Unknown 2-prefix SKU remains visible for configuration review.
+  line({ channel: "EV", sku: "299999", itemName: "New Snack", quantity: 4 }),
+  // Explicitly ignored PAR SKU stays out of both totals and audit.
+  line({ sku: "261400", itemName: "Spicy Candied Peanuts Tube", quantity: 5 }),
+];
+
+beforeEach(() => {
+  findMany.mockReset();
+  findMany.mockResolvedValue(LINES);
+});
+
+describe("computeSnacksByUnitReport", () => {
+  it("requests mapped snack candidates and excludes invoiced sales", async () => {
+    await computeSnacksByUnitReport("tea.myshopify.com", RANGE);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          shop: "tea.myshopify.com",
+          day: { gte: RANGE.start, lte: RANGE.end },
+          channel: { in: ["WV", "EV", "ECOM"] },
+          kind: { in: ["sale", "return", "usage"] },
+        }),
+      }),
+    );
+  });
+
+  it("converts packs, nets returns, and splits bundles into kitchen units", async () => {
+    const report = await computeSnacksByUnitReport("s", RANGE);
+    expect(report.channels).toEqual(["ECOM", "EV", "WV"]);
+    expect(
+      report.rows.find((row) => row.key === "pineapple_cake"),
+    ).toMatchObject({
+      byChannel: { ECOM: 0, EV: 16, WV: 3 },
+      totalUnits: 19,
+    });
+    expect(
+      report.rows.find((row) => row.key === "pineapple_linzer"),
+    ).toMatchObject({
+      byChannel: { ECOM: 0, EV: 0, WV: 2 },
+      totalUnits: 2,
+    });
+    for (const key of [
+      "button_shortbread",
+      "button_almond",
+      "button_chocolate",
+      "button_walnut",
+    ]) {
+      expect(report.rows.find((row) => row.key === key)).toMatchObject({
+        byChannel: { ECOM: 2, EV: 0, WV: 0 },
+        totalUnits: 2,
+      });
+    }
+    expect(report.totalUnits).toBe(29);
+  });
+
+  it("reports unmapped snack SKUs but suppresses configured ignores", async () => {
+    const report = await computeSnacksByUnitReport("s", RANGE);
+    expect(report.unmapped).toEqual([
+      { sku: "299999", name: "New Snack", channel: "EV", quantity: 4 },
+    ]);
+  });
+});

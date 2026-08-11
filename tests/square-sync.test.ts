@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../app/db.server", () => ({ default: {} }));
 vi.mock("../app/.server/square/client", () => ({ squareFetch: vi.fn() }));
 
-import { tastingFlightTeaSelections } from "../app/.server/analytics/square-sync";
+import {
+  snackFlightSelections,
+  tastingFlightTeaSelections,
+} from "../app/.server/analytics/square-sync";
 
 describe("tastingFlightTeaSelections", () => {
   it("extracts explicit tea SKUs and multiplies line and modifier quantities", () => {
@@ -91,5 +94,59 @@ describe("tastingFlightTeaSelections", () => {
       sku: null,
       quantity: 1,
     });
+  });
+});
+
+describe("snackFlightSelections", () => {
+  it("extracts snack choices and multiplies parent and modifier quantities", () => {
+    expect(
+      snackFlightSelections({
+        name: "Snack Flight",
+        quantity: "2",
+        modifiers: [
+          { uid: "one", name: "Pineapple Linzer (200120)", quantity: "2" },
+          { uid: "two", name: "Button Trio (210421)" },
+        ],
+      }),
+    ).toEqual([
+      { uid: "one", sku: "200120", snack: "Pineapple Linzer", quantity: 4 },
+      { uid: "two", sku: "210421", snack: "Button Trio", quantity: 2 },
+    ]);
+  });
+
+  it("uses a modifier's current catalog SKU when available", () => {
+    expect(
+      snackFlightSelections(
+        {
+          name: "Snack Flight",
+          modifiers: [{ catalog_object_id: "tinybar-choice", name: "tinybar" }],
+        },
+        new Map([["tinybar-choice", { sku: "220511" }]]),
+      ),
+    ).toEqual([{ uid: "0", sku: "220511", snack: "tinybar", quantity: 1 }]);
+  });
+
+  it("ignores modifiers on ordinary products", () => {
+    expect(
+      snackFlightSelections({
+        name: "Pineapple Cake",
+        modifiers: [{ name: "Pineapple Linzer (200120)" }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("recognizes the flight by its stable SKU when the button is renamed", () => {
+    expect(
+      snackFlightSelections(
+        {
+          name: "Tea Time",
+          modifiers: [{ name: "Pineapple Linzer (200120)" }],
+        },
+        new Map(),
+        "270210",
+      ),
+    ).toEqual([
+      { uid: "0", sku: "200120", snack: "Pineapple Linzer", quantity: 1 },
+    ]);
   });
 });
