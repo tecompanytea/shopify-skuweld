@@ -61,6 +61,38 @@ const LINES: Line[] = [
     quantity: 2,
     category: "Snack Flight Component",
   }),
+  line({
+    channel: "EV",
+    sku: "200101",
+    itemName: "Pineapple Linzer Box",
+    quantity: 1,
+  }),
+  line({
+    channel: "ECOM",
+    sku: "200102",
+    itemName: "Pineapple Linzer Cookie - 2 Boxes",
+    quantity: 1,
+    category: "Snacks",
+  }),
+  line({
+    sku: "202220",
+    itemName: "Raspberry Linzer",
+    quantity: 3,
+    category: "Service Snacks",
+  }),
+  line({
+    channel: "EV",
+    sku: "202201",
+    itemName: "Raspberry Linzer Box",
+    quantity: 2,
+  }),
+  line({
+    channel: "EV",
+    sku: "200305",
+    itemName: "Panna Cotta",
+    quantity: 2,
+    category: "Service Snacks",
+  }),
   // Unknown 2-prefix SKU remains visible for configuration review.
   line({ channel: "EV", sku: "299999", itemName: "New Snack", quantity: 4 }),
   // Explicitly ignored PAR SKU stays out of both totals and audit.
@@ -99,8 +131,8 @@ describe("computeSnacksByUnitReport", () => {
     expect(
       report.rows.find((row) => row.key === "pineapple_linzer"),
     ).toMatchObject({
-      byChannel: { ECOM: 0, EV: 0, WV: 2 },
-      totalUnits: 2,
+      byChannel: { ECOM: 12, EV: 6, WV: 2 },
+      totalUnits: 20,
     });
     for (const key of [
       "button_shortbread",
@@ -113,7 +145,17 @@ describe("computeSnacksByUnitReport", () => {
         totalUnits: 2,
       });
     }
-    expect(report.totalUnits).toBe(29);
+    expect(
+      report.rows.find((row) => row.key === "raspberry_linzer"),
+    ).toMatchObject({
+      byChannel: { ECOM: 0, EV: 12, WV: 3 },
+      totalUnits: 15,
+    });
+    expect(report.rows.find((row) => row.key === "panna_cotta")).toMatchObject({
+      byChannel: { ECOM: 0, EV: 2, WV: 0 },
+      totalUnits: 2,
+    });
+    expect(report.totalUnits).toBe(64);
   });
 
   it("reports unmapped snack SKUs but suppresses configured ignores", async () => {

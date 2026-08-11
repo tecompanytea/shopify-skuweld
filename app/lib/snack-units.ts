@@ -39,8 +39,32 @@ const ITEMS: SnackItem[] = [
       "200120",
       { sku: "200101", multiplier: 6 },
       { sku: "200102", multiplier: 12 },
+      // Legacy Shopify and subscription SKUs for the same 1/2-box packs.
+      { sku: "01000", multiplier: 6 },
+      { sku: "01001", multiplier: 12 },
+      { sku: "200151", multiplier: 6 },
+      { sku: "200152", multiplier: 12 },
     ],
-    ["Pineapple Linzer", { name: "Pineapple Linzer Box", multiplier: 6 }],
+    [
+      "Pineapple Linzer",
+      { name: "Pineapple Linzer Box", multiplier: 6 },
+      { name: "Pineapple Linzer Cookie", multiplier: 6 },
+      { name: "1 box Pineapple Linzer", multiplier: 6 },
+      { name: "1 box of Pineapple Linzer", multiplier: 6 },
+      { name: "2 Boxes Pineapple Linzer", multiplier: 12 },
+    ],
+  ),
+  item(
+    "raspberry_linzer",
+    "Raspberry Linzer",
+    "Cookies",
+    ["202220", { sku: "202201", multiplier: 6 }],
+    [
+      "Raspberry",
+      "Raspberry Linzer",
+      { name: "Raspberry Linzer Box", multiplier: 6 },
+      { name: "Raspberry Linzer Cookie", multiplier: 6 },
+    ],
   ),
   item(
     "pineapple_linzer_mini",
@@ -278,6 +302,7 @@ const ITEMS: SnackItem[] = [
       { name: "Cheesecake Sandwiches (2 / EA)", multiplier: 2 },
     ],
   ),
+  item("panna_cotta", "Panna Cotta", "Service Snacks", ["200305"]),
   item(
     "jam_to_serve",
     "Jam (to Serve) S. Rhubarb",
