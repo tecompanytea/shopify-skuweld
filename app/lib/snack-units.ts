@@ -20,6 +20,7 @@ interface SnackItem {
 interface SnackBundle {
   sku: string;
   components: Array<{ key: string; multiplier: number }>;
+  aliases?: string[];
 }
 
 const item = (
@@ -106,6 +107,24 @@ const ITEMS: SnackItem[] = [
     ["Seasonal Linzer - Mini", "Seasonal Linzer Mini", "Mini Seasonal Linzer"],
   ),
   item("button_shortbread", "Button Shortbread", "Cookies", []),
+  item(
+    "butter_shortbread",
+    "Butter Shortbread",
+    "Cookies",
+    [
+      { sku: "200220", multiplier: 2 },
+      { sku: "200201", multiplier: 6 },
+      { sku: "200251", multiplier: 6 },
+      { sku: "200252", multiplier: 12 },
+      { sku: "200253", multiplier: 18 },
+      { sku: "200254", multiplier: 24 },
+    ],
+    [
+      { name: "Shortbread", multiplier: 2 },
+      { name: "Shortbread Box", multiplier: 6 },
+      { name: "Shortbread Cookie", multiplier: 6 },
+    ],
+  ),
   item(
     "button_chocolate",
     "Button Chocolate",
@@ -226,14 +245,14 @@ const ITEMS: SnackItem[] = [
   ),
   item(
     "mung_bean_moon",
-    "Mung Bean Moon",
+    "Mung Bean Mooncake",
     "Laminated",
     ["206020", "230111"],
     ["Mung Bean Moon", "Mung Bean Mooncake", "Mooncake"],
   ),
   item(
-    "red_bean_moon_yolk",
-    "Red Bean Moon w/ Yolk",
+    "red_bean_moon",
+    "Red Bean Mooncake",
     "Laminated",
     ["230211"],
     [
@@ -244,6 +263,19 @@ const ITEMS: SnackItem[] = [
       "Red bean mooncake",
     ],
   ),
+  item(
+    "mung_bean_moon_yolk",
+    "Mung Bean Mooncake with Yolk",
+    "Laminated",
+    ["206021"],
+    [
+      "Mung Bean with Yolk",
+      "Mung Bean Mooncake with Yolk",
+      "Salt Yolk Mooncake",
+      "Salt yolk mooncake",
+    ],
+  ),
+  item("sweet_potato", "Sweet Potato", "Others", ["250221"]),
   item(
     "biscuit_scallion_pork",
     "Biscuit Scallion and Pork",
@@ -410,30 +442,34 @@ const BUNDLES: SnackBundle[] = [
       { key: "tinybar_pumpkin_seed", multiplier: 3 },
     ],
   })),
-  { sku: "230101", components: [{ key: "mung_bean_moon", multiplier: 6 }] },
-  { sku: "230201", components: [{ key: "red_bean_moon_yolk", multiplier: 6 }] },
+  ...["230101", "206001", "206011", "230110"].map((sku) => ({
+    sku,
+    components: [{ key: "mung_bean_moon", multiplier: 6 }],
+  })),
+  { sku: "230201", components: [{ key: "red_bean_moon", multiplier: 6 }] },
+  {
+    sku: "206002",
+    components: [{ key: "mung_bean_moon_yolk", multiplier: 6 }],
+  },
   {
     sku: "230301",
     components: [
-      { key: "mung_bean_moon", multiplier: 3 },
-      { key: "red_bean_moon_yolk", multiplier: 3 },
+      { key: "red_bean_moon", multiplier: 2 },
+      { key: "mung_bean_moon", multiplier: 2 },
+      { key: "mung_bean_moon_yolk", multiplier: 2 },
     ],
+    aliases: ["Assorted Mooncake", "Assorted Mooncake Box"],
   },
+  ...["206003", "206013"].map((sku) => ({
+    sku,
+    components: [
+      { key: "red_bean_moon", multiplier: 2 },
+      { key: "mung_bean_moon", multiplier: 2 },
+      { key: "mung_bean_moon_yolk", multiplier: 2 },
+    ],
+  })),
   { sku: "262500", components: [{ key: "tea_egg", multiplier: 2 }] },
 ];
-
-export const IGNORED_SNACK_SKUS = new Set([
-  "206021",
-  "261400",
-  "261200",
-  "261500",
-  "200220",
-  "200201",
-  "250221",
-  "203402",
-  "203401",
-  "263100",
-]);
 
 export const SNACK_BUNDLE_SKUS = BUNDLES.map((bundle) => bundle.sku);
 
@@ -475,14 +511,15 @@ for (const entry of ITEMS) {
 }
 
 for (const bundle of BUNDLES) {
-  bySku.set(
-    bundle.sku,
-    bundle.components.map((component) => {
-      const entry = byKey.get(component.key);
-      if (!entry) throw new Error(`Unknown snack component: ${component.key}`);
-      return allocation(entry, component.multiplier);
-    }),
-  );
+  const allocations = bundle.components.map((component) => {
+    const entry = byKey.get(component.key);
+    if (!entry) throw new Error(`Unknown snack component: ${component.key}`);
+    return allocation(entry, component.multiplier);
+  });
+  bySku.set(bundle.sku, allocations);
+  for (const alias of bundle.aliases ?? []) {
+    byName.set(normalize(alias), allocations);
+  }
 }
 
 export function snackAllocations(

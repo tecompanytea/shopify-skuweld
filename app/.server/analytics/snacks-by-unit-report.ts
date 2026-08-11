@@ -1,9 +1,5 @@
 import prisma from "../../db.server";
-import {
-  IGNORED_SNACK_SKUS,
-  SNACK_BUNDLE_SKUS,
-  snackAllocations,
-} from "../../lib/snack-units";
+import { SNACK_BUNDLE_SKUS, snackAllocations } from "../../lib/snack-units";
 import type { DayRange } from "../../lib/periods";
 
 // Kitchen-unit snack demand for the selected period. Package and gift SKUs
@@ -90,12 +86,10 @@ export async function computeSnacksByUnitReport(
     if (line.kind !== "usage" && isSnackFlight(line.sku, line.itemName)) {
       continue;
     }
-    if (line.sku && IGNORED_SNACK_SKUS.has(line.sku)) continue;
-
-    const allocations = snackAllocations(line.sku, line.itemName);
+    let allocations = snackAllocations(line.sku, line.itemName);
     if (!allocations) {
       const looksLikeSnack =
-        line.sku?.startsWith("2") ||
+        (line.sku ? /^2\d{5}$/.test(line.sku) : false) ||
         line.category === "Snack Flight Component" ||
         line.category === "Retail Snacks" ||
         line.category === "Service Snacks" ||
@@ -110,7 +104,19 @@ export async function computeSnacksByUnitReport(
         };
         row.quantity += line.quantity;
         unmapped.set(key, row);
+        // Never silently omit a snack sale. Until a package conversion is
+        // confirmed, count the sold line 1:1 and keep it in the review table.
+        allocations = [
+          {
+            key: `unmapped:${line.sku ?? line.itemName.toLowerCase()}`,
+            name: line.itemName,
+            category: line.category ?? "Snacks",
+            multiplier: 1,
+          },
+        ];
       }
+    }
+    if (!allocations) {
       continue;
     }
 

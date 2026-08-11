@@ -1185,8 +1185,8 @@ function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
           <s-box padding="base">
             <s-heading>Unmapped snack SKUs</s-heading>
             <s-paragraph>
-              These sales need a kitchen-unit conversion before they can enter
-              the totals.
+              These sales are included 1:1 in the totals. Confirm their pack
+              conversion to make the kitchen-unit count exact.
             </s-paragraph>
           </s-box>
           <s-table>

@@ -573,7 +573,9 @@ function writeSnacksByUnitSheet(
 
   if (report.unmapped.length > 0) {
     sheet.addRow([]);
-    sheet.addRow(["Unmapped snack SKUs — excluded from totals"]).font = {
+    sheet.addRow([
+      "Unmapped snack SKUs — counted 1:1 pending conversion",
+    ]).font = {
       bold: true,
     };
     sheet.addRow(["SKU", "Snack", "Channel", "Sold Quantity"]).font = {

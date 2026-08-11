@@ -82,6 +82,40 @@ const LINES: Line[] = [
   }),
   line({
     channel: "EV",
+    sku: "200220",
+    itemName: "Shortbread",
+    quantity: 1,
+    category: "Service Snacks",
+  }),
+  line({
+    channel: "ECOM",
+    sku: "200201",
+    itemName: "Shortbread Box",
+    quantity: 1,
+    category: "Snacks",
+  }),
+  line({
+    sku: "250221",
+    itemName: "Sweet Potato",
+    quantity: 1,
+    category: "Service Snacks",
+  }),
+  line({
+    channel: "ECOM",
+    sku: "230301",
+    itemName: "Assorted Mooncake",
+    quantity: 1,
+    category: "Snacks",
+  }),
+  line({
+    channel: "ECOM",
+    sku: null,
+    itemName: "Assorted Mooncake",
+    quantity: 1,
+    category: "Snacks",
+  }),
+  line({
+    channel: "EV",
     sku: "202201",
     itemName: "Raspberry Linzer Box",
     quantity: 2,
@@ -155,13 +189,53 @@ describe("computeSnacksByUnitReport", () => {
       byChannel: { ECOM: 0, EV: 2, WV: 0 },
       totalUnits: 2,
     });
-    expect(report.totalUnits).toBe(64);
+    expect(
+      report.rows.find((row) => row.key === "butter_shortbread"),
+    ).toMatchObject({
+      byChannel: { ECOM: 6, EV: 2, WV: 0 },
+      totalUnits: 8,
+    });
+    expect(report.rows.find((row) => row.key === "sweet_potato")).toMatchObject(
+      {
+        byChannel: { ECOM: 0, EV: 0, WV: 1 },
+        totalUnits: 1,
+      },
+    );
+    expect(
+      report.rows.find((row) => row.key === "red_bean_moon"),
+    ).toMatchObject({
+      byChannel: { ECOM: 4, EV: 0, WV: 0 },
+      totalUnits: 4,
+    });
+    expect(
+      report.rows.find((row) => row.key === "mung_bean_moon"),
+    ).toMatchObject({
+      byChannel: { ECOM: 4, EV: 0, WV: 0 },
+      totalUnits: 4,
+    });
+    expect(
+      report.rows.find((row) => row.key === "mung_bean_moon_yolk"),
+    ).toMatchObject({
+      byChannel: { ECOM: 4, EV: 0, WV: 0 },
+      totalUnits: 4,
+    });
+    // Unknown 2-prefix snacks still enter totals 1:1 until configured.
+    expect(report.totalUnits).toBe(94);
   });
 
-  it("reports unmapped snack SKUs but suppresses configured ignores", async () => {
+  it("reports unconfigured snack SKUs while counting them 1:1", async () => {
     const report = await computeSnacksByUnitReport("s", RANGE);
     expect(report.unmapped).toEqual([
+      {
+        sku: "261400",
+        name: "Spicy Candied Peanuts Tube",
+        channel: "WV",
+        quantity: 5,
+      },
       { sku: "299999", name: "New Snack", channel: "EV", quantity: 4 },
     ]);
+    expect(
+      report.rows.find((row) => row.key === "unmapped:261400")?.totalUnits,
+    ).toBe(5);
   });
 });
