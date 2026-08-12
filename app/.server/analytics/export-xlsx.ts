@@ -556,7 +556,7 @@ function writeSnacksByUnitSheet(
   ]).font = { bold: true, size: 13 };
   const header = sheet.addRow([
     "Snack",
-    "Category",
+    "Snack SKU Category",
     ...report.channels,
     "Total Units",
   ]);

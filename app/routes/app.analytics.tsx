@@ -1137,13 +1137,16 @@ function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
       <s-box padding="base">
         <s-paragraph>
           Kitchen units after pack and gift-set conversions; returns subtract.
-          Snack Flight choices count instead of the parent bundle.
+          Snack Flight choices count instead of the parent bundle. Snack SKU
+          Category comes from the SKU conversion mapping.
         </s-paragraph>
       </s-box>
       <s-table>
         <s-table-header-row>
           <s-table-header listSlot="primary">Snack</s-table-header>
-          <s-table-header listSlot="kicker">Category</s-table-header>
+          <s-table-header listSlot="kicker">
+            Snack SKU Category
+          </s-table-header>
           {report.channels.map((channel) => (
             <s-table-header key={channel} listSlot="labeled" format="numeric">
               {channel}
