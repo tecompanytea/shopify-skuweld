@@ -363,8 +363,8 @@ export async function buildProductSellingWorkbook(
   const head = summary.addRow([
     "",
     "Channel",
-    "LY Net $",
     "TY Net $",
+    "LY Net $",
     "$ Change",
     "% Change",
   ]);
@@ -381,8 +381,8 @@ export async function buildProductSellingWorkbook(
     const totals = report.channelTotals[key];
     const row = summary.addRow(["", label]);
     if (key === "ALL") row.font = { bold: true };
-    moneyCell(row, 3, totals.ly.net);
-    moneyCell(row, 4, totals.ty.net);
+    moneyCell(row, 3, totals.ty.net);
+    moneyCell(row, 4, totals.ly.net);
     moneyCell(row, 5, totals.ty.net - totals.ly.net);
     pctCell(row, 6, totals.ty.net, totals.ly.net);
   }
@@ -400,11 +400,11 @@ export async function buildProductSellingWorkbook(
     const header = sheet.addRow([
       "#",
       "Product",
-      "LY Net $",
       "TY Net $",
+      "LY Net $",
       "% Change",
-      "LY Units",
       "TY Units",
+      "LY Units",
     ]);
     header.font = { bold: true };
     let rank = 0;
@@ -416,14 +416,14 @@ export async function buildProductSellingWorkbook(
     for (const r of rows) {
       rank += 1;
       const row = sheet.addRow([rank, r.name]);
-      moneyCell(row, 3, r.ly.net);
-      moneyCell(row, 4, r.ty.net);
+      moneyCell(row, 3, r.ty.net);
+      moneyCell(row, 4, r.ly.net);
       const change = pct(r.ty.net, r.ly.net);
       row.getCell(5).value = r.ty.net === 0 && r.ly.net > 0 ? "Gone" : change;
       if (typeof change === "number" && r.ty.net !== 0)
         row.getCell(5).numFmt = PCT;
-      row.getCell(6).value = r.ly.units;
-      row.getCell(7).value = r.ty.units;
+      row.getCell(6).value = r.ty.units;
+      row.getCell(7).value = r.ly.units;
       totals = {
         tyNet: totals.tyNet + r.ty.net,
         lyNet: totals.lyNet + r.ly.net,
@@ -433,11 +433,11 @@ export async function buildProductSellingWorkbook(
     }
     const totalRow = sheet.addRow(["", `TOTAL — ${report.scope.label} Net`]);
     totalRow.font = { bold: true };
-    moneyCell(totalRow, 3, totals.lyNet);
-    moneyCell(totalRow, 4, totals.tyNet);
+    moneyCell(totalRow, 3, totals.tyNet);
+    moneyCell(totalRow, 4, totals.lyNet);
     pctCell(totalRow, 5, totals.tyNet, totals.lyNet);
-    totalRow.getCell(6).value = totals.lyUnits;
-    totalRow.getCell(7).value = totals.tyUnits;
+    totalRow.getCell(6).value = totals.tyUnits;
+    totalRow.getCell(7).value = totals.lyUnits;
   };
 
   addChannelSheet("West Village", (r) => r.channels.WV);
@@ -458,16 +458,18 @@ function writeProductCombinedSheet(
 ): void {
   const combined = workbook.addWorksheet(title);
   combined.getColumn(2).width = 42;
-  for (const c of [3, 4, 5, 6, 7, 8]) combined.getColumn(c).width = 13;
+  for (const c of [3, 4, 5, 6, 7, 8, 9, 10]) combined.getColumn(c).width = 13;
   combined.addRow([
     `${report.scope.label} — ${report.range.start} → ${report.range.end} vs ${report.lyRange.start} → ${report.lyRange.end}`,
   ]).font = { bold: true };
   const combinedHeader = combined.addRow([
     "#",
     "Product",
-    "LY Net $ TOTAL",
     "TY Net $ TOTAL",
+    "LY Net $ TOTAL",
     "% Change",
+    "TY Units",
+    "LY Units",
     "WV TY $",
     "EV TY $",
     "E-com TY $",
@@ -475,17 +477,21 @@ function writeProductCombinedSheet(
   combinedHeader.font = { bold: true };
   report.rows.forEach((r, index) => {
     const row = combined.addRow([index + 1, r.name]);
-    moneyCell(row, 3, r.ly.net);
-    moneyCell(row, 4, r.ty.net);
+    moneyCell(row, 3, r.ty.net);
+    moneyCell(row, 4, r.ly.net);
     pctCell(row, 5, r.ty.net, r.ly.net);
-    moneyCell(row, 6, r.channels.WV.ty.net);
-    moneyCell(row, 7, r.channels.EV.ty.net);
-    moneyCell(row, 8, r.channels.ECOM.ty.net);
+    row.getCell(6).value = r.ty.units;
+    row.getCell(7).value = r.ly.units;
+    moneyCell(row, 8, r.channels.WV.ty.net);
+    moneyCell(row, 9, r.channels.EV.ty.net);
+    moneyCell(row, 10, r.channels.ECOM.ty.net);
   });
   const totalRow = combined.addRow(["", "TOTAL"]);
   totalRow.font = { bold: true };
-  moneyCell(totalRow, 3, report.channelTotals.ALL.ly.net);
-  moneyCell(totalRow, 4, report.channelTotals.ALL.ty.net);
+  moneyCell(totalRow, 3, report.channelTotals.ALL.ty.net);
+  moneyCell(totalRow, 4, report.channelTotals.ALL.ly.net);
+  totalRow.getCell(6).value = report.channelTotals.ALL.ty.units;
+  totalRow.getCell(7).value = report.channelTotals.ALL.ly.units;
   pctCell(
     totalRow,
     5,
