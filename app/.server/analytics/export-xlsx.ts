@@ -547,8 +547,9 @@ function writeSnacksByUnitSheet(
 ): void {
   const sheet = workbook.addWorksheet(title.slice(0, 31));
   sheet.getColumn(1).width = 42;
-  sheet.getColumn(2).width = 24;
-  for (let column = 3; column <= report.channels.length + 3; column += 1) {
+  sheet.getColumn(2).width = 32;
+  sheet.getColumn(3).width = 24;
+  for (let column = 4; column <= report.channels.length + 4; column += 1) {
     sheet.getColumn(column).width = 14;
   }
   sheet.addRow([
@@ -556,6 +557,7 @@ function writeSnacksByUnitSheet(
   ]).font = { bold: true, size: 13 };
   const header = sheet.addRow([
     "Snack",
+    "Related SKUs",
     "Snack SKU Category",
     ...report.channels,
     "Total Units",
@@ -564,6 +566,7 @@ function writeSnacksByUnitSheet(
   for (const reportRow of report.rows) {
     sheet.addRow([
       reportRow.name,
+      reportRow.skus.join(", "),
       reportRow.category,
       ...report.channels.map((channel) => reportRow.byChannel[channel]),
       reportRow.totalUnits,
@@ -571,6 +574,7 @@ function writeSnacksByUnitSheet(
   }
   const total = sheet.addRow([
     "TOTAL",
+    "",
     "",
     ...report.channels.map((channel) => report.totalsByChannel[channel]),
     report.totalUnits,

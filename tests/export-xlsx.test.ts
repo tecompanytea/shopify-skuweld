@@ -176,6 +176,7 @@ describe("snacks-by-unit workbook export", () => {
         {
           key: "pineapple_linzer",
           name: "Pineapple Linzer",
+          skus: ["200101", "200102", "200120"],
           category: "Cookies",
           byChannel: { ECOM: 12, EV: 6, WV: 2 },
           totalUnits: 20,
@@ -192,14 +193,16 @@ describe("snacks-by-unit workbook export", () => {
 
     expect(rowValues(sheet.getRow(2)).slice(1)).toEqual([
       "Snack",
+      "Related SKUs",
       "Snack SKU Category",
       "ECOM",
       "EV",
       "WV",
       "Total Units",
     ]);
-    expect(rowValues(sheet.getRow(3)).slice(1, 3)).toEqual([
+    expect(rowValues(sheet.getRow(3)).slice(1, 4)).toEqual([
       "Pineapple Linzer",
+      "200101, 200102, 200120",
       "Cookies",
     ]);
   });

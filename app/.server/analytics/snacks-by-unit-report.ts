@@ -9,6 +9,7 @@ import type { DayRange } from "../../lib/periods";
 export interface SnackUnitsRow {
   key: string;
   name: string;
+  skus: string[];
   category: string;
   byChannel: Record<string, number>;
   totalUnits: number;
@@ -33,6 +34,7 @@ export interface SnacksByUnitReport {
 interface Accumulator {
   key: string;
   name: string;
+  skus: Set<string>;
   category: string;
   byChannel: Map<string, number>;
 }
@@ -126,10 +128,15 @@ export async function computeSnacksByUnitReport(
         product = {
           key: allocation.key,
           name: allocation.name,
+          skus: new Set(),
           category: allocation.category,
           byChannel: new Map(),
         };
         products.set(allocation.key, product);
+      }
+      const sourceSku = line.sku?.trim();
+      if (sourceSku) {
+        product.skus.add(sourceSku);
       }
       product.byChannel.set(
         line.channel,
@@ -146,6 +153,7 @@ export async function computeSnacksByUnitReport(
     return {
       key: product.key,
       name: product.name,
+      skus: [...product.skus].sort((a, b) => a.localeCompare(b)),
       category: product.category,
       byChannel,
       totalUnits: channels.reduce(

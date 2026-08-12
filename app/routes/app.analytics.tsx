@@ -1138,15 +1138,15 @@ function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
         <s-paragraph>
           Kitchen units after pack and gift-set conversions; returns subtract.
           Snack Flight choices count instead of the parent bundle. Snack SKU
-          Category comes from the SKU conversion mapping.
+          Category comes from the SKU conversion mapping. Related SKUs are the
+          actual source SKUs counted during the selected period.
         </s-paragraph>
       </s-box>
       <s-table>
         <s-table-header-row>
           <s-table-header listSlot="primary">Snack</s-table-header>
-          <s-table-header listSlot="kicker">
-            Snack SKU Category
-          </s-table-header>
+          <s-table-header listSlot="kicker">Related SKUs</s-table-header>
+          <s-table-header listSlot="kicker">Snack SKU Category</s-table-header>
           {report.channels.map((channel) => (
             <s-table-header key={channel} listSlot="labeled" format="numeric">
               {channel}
@@ -1160,6 +1160,9 @@ function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
           {report.rows.map((row) => (
             <s-table-row key={row.key}>
               <s-table-cell>{row.name}</s-table-cell>
+              <s-table-cell>
+                {row.skus.length > 0 ? row.skus.join(", ") : "—"}
+              </s-table-cell>
               <s-table-cell>{row.category}</s-table-cell>
               {report.channels.map((channel) => (
                 <s-table-cell key={channel}>
@@ -1172,6 +1175,7 @@ function SnacksByUnitBlock({ report }: { report: SnacksByUnitReport }) {
           {report.rows.length > 0 && (
             <s-table-row>
               <s-table-cell>TOTAL</s-table-cell>
+              <s-table-cell></s-table-cell>
               <s-table-cell></s-table-cell>
               {report.channels.map((channel) => (
                 <s-table-cell key={channel}>

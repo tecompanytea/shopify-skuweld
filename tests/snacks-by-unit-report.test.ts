@@ -159,12 +159,14 @@ describe("computeSnacksByUnitReport", () => {
     expect(
       report.rows.find((row) => row.key === "pineapple_cake"),
     ).toMatchObject({
+      skus: ["203002", "203020"],
       byChannel: { ECOM: 0, EV: 16, WV: 3 },
       totalUnits: 19,
     });
     expect(
       report.rows.find((row) => row.key === "pineapple_linzer"),
     ).toMatchObject({
+      skus: ["200101", "200102", "200120"],
       byChannel: { ECOM: 12, EV: 6, WV: 2 },
       totalUnits: 20,
     });
@@ -175,6 +177,7 @@ describe("computeSnacksByUnitReport", () => {
       "button_walnut",
     ]) {
       expect(report.rows.find((row) => row.key === key)).toMatchObject({
+        skus: ["210421"],
         byChannel: { ECOM: 2, EV: 0, WV: 0 },
         totalUnits: 2,
       });
